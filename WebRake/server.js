@@ -19,11 +19,15 @@ const PLAYER_SPEED = 7;
 const RAKE_SPEED = 7;
 const RAKE_CHASE_SPEED = 19;
 
+// DEVELOPMENT BUILD: start directly in NIGHT so the Rake hunts immediately.
+// Set START_IN_NIGHT to false before publishing the normal day-start build.
+const START_IN_NIGHT = true;
+
 const players = new Map();
 const sockets = new Map();
 let nextId = 1;
-let cycleTimer = DAY_LENGTH;
-let isNight = false;
+let cycleTimer = START_IN_NIGHT ? NIGHT_LENGTH : DAY_LENGTH;
+let isNight = START_IN_NIGHT;
 let lastTick = Date.now();
 let attackCooldown = 0;
 
@@ -181,7 +185,6 @@ function update(dt) {
   rake.walking = false;
 
   if (!isNight) {
-    // During the day the Rake always returns to its exact spawn.
     rake.walking = moveRakeToward(
       rake.spawnX,
       rake.spawnY,
@@ -190,7 +193,6 @@ function update(dt) {
       dt
     );
   } else {
-    // At night find the nearest living CharacterController/player.
     let closest = null;
     let best = Infinity;
 
@@ -257,7 +259,6 @@ function moveRakeToward(tx, ty, tz, speed, dt) {
     return false;
   }
 
-  // Face the direction the Rake is actually moving.
   rake.rot = Math.atan2(dx, dz);
 
   const step = Math.min(distance, speed * dt);
@@ -281,6 +282,7 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`The Rake server running at http://localhost:${PORT}`);
   console.log(`LAN: http://<YOUR-PC-IP>:${PORT}`);
-  console.log(`Day: ${DAY_LENGTH}s | Night: ${NIGHT_LENGTH}s`);
+  console.log(`DEVELOPMENT MODE: starts in NIGHT (${NIGHT_LENGTH}s)`);
+  console.log(`Normal cycle: Day ${DAY_LENGTH}s | Night ${NIGHT_LENGTH}s`);
   console.log(`Rake chase speed: ${RAKE_CHASE_SPEED}`);
 });
