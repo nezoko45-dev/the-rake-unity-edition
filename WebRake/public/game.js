@@ -6,16 +6,13 @@ scene.background = new THREE.Color(0x0b120d);
 scene.fog = new THREE.FogExp2(0x0b120d, 0.012);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 700);
-camera.position.set(0, 2, 8);
-
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-const hemi = new THREE.HemisphereLight(0x9bb8a0, 0x152015, 1.25);
-scene.add(hemi);
+scene.add(new THREE.HemisphereLight(0x9bb8a0, 0x152015, 1.25));
 const sun = new THREE.DirectionalLight(0xffffff, 1.8);
 sun.position.set(-60, 100, 30);
 sun.castShadow = true;
@@ -37,21 +34,23 @@ for (let i = 0; i < 130; i++) {
 }
 
 const playerMeshes = new Map();
-let myId = null;
-let myHealth = 100;
 const clock = new THREE.Clock();
 const keys = new Set();
+const local = new THREE.Vector3(0, 1, 0);
+let myId = null;
+let myHealth = 100;
 let yaw = 0;
 let pitch = 0;
-let mouseLocked = false;
-const local = { x: 0, y: 1, z: 0 };
-const rakeTarget = new THREE.Vector3();
+let pointerLocked = false;
+const PLAYER_SPEED = 7;
+
 let rakeRoot = null;
 let rakeMixer = null;
 const rakeActions = {};
 let currentRakeAction = null;
-let lastRakeWalking = false;
-let lastRakeAttacking = false;
+let lastRakeWalking = null;
+let lastRakeAttacking = null;
+const rakeTarget = new THREE.Vector3();
 
 function makePlayerMesh(isLocal = false) {
   const group = new THREE.Group();
@@ -66,27 +65,18 @@ function makePlayerMesh(isLocal = false) {
 }
 
 function loadRake() {
-  const loader = new GLTFLoader();
-  loader.load('/assets/rake.glb', gltf => {
-    // Keep a clean root transform for the networked Rake position.
+  new GLTFLoader().load('/assets/rake.glb', gltf => {
     rakeRoot = new THREE.Group();
     rakeRoot.name = 'RakeRoot';
     scene.add(rakeRoot);
 
-    // Put the imported model underneath the root and normalize its local transform.
     const model = gltf.scene;
     model.name = 'RakeModel';
     model.position.set(0, 0, 0);
     model.rotation.set(0, THREE.MathUtils.degToRad(180), 0);
     model.scale.setScalar(1);
 
-    // Reset the armature and other direct children so the model's internal
-    // hierarchy does not introduce an unwanted offset from the ground/root.
     model.traverse(o => {
-      if (o.isBone || o.name.toLowerCase().includes('armature')) {
-        o.position.set(o.position.x, o.position.y, o.position.z);
-      }
-
       if (o.isMesh) {
         o.castShadow = true;
         o.receiveShadow = true;
@@ -95,23 +85,14 @@ function loadRake() {
 
     rakeRoot.add(model);
 
-    // The root is the authoritative ground position. The imported model
-    // is deliberately local Y=0 and rotated 180 degrees to face forward.
-    rakeRoot.position.set(0, 0, 0);
-    rakeRoot.rotation.set(0, 0, 0);
-
     if (gltf.animations?.length) {
       rakeMixer = new THREE.AnimationMixer(model);
-
       for (const clip of gltf.animations) {
         const key = clip.name.toLowerCase().replace(/[^a-z0-9]/g, '');
         rakeActions[key] = rakeMixer.clipAction(clip);
         console.log('Rake animation:', clip.name);
       }
-
       playRakeAnimation('idle');
-    } else {
-      console.warn('Rake GLB contains no animations.');
     }
   }, undefined, err => {
     console.error('Failed to load Rake GLB:', err);
@@ -121,50 +102,36 @@ function loadRake() {
 
 function playRakeAnimation(name) {
   if (!rakeMixer) return;
-
   const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
   let action = rakeActions[normalized];
-
   if (!action) {
-    const found = Object.keys(rakeActions).find(
-      k => k.includes(normalized) || normalized.includes(k)
-    );
+    const found = Object.keys(rakeActions).find(k => k.includes(normalized) || normalized.includes(k));
     if (found) action = rakeActions[found];
   }
-
   if (!action || currentRakeAction === action) return;
-
-  if (currentRakeAction) {
-    currentRakeAction.fadeOut(.15);
-  }
-
-  action.reset().fadeIn(.15).play();
+  if (currentRakeAction) currentRakeAction.fadeOut(.12);
+  action.reset().fadeIn(.12).play();
   currentRakeAction = action;
 }
 
 function setStatus(text) {
-  document.getElementById('status').textContent = text;
+  const el = document.getElementById('status');
+  if (el) el.textContent = text;
 }
 
-const ws = new WebSocket(
-  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
-);
-
-ws.onopen = () => setStatus('Connected · finding players...');
+const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+ws.onopen = () => setStatus('Connected · click to look around');
 ws.onclose = () => setStatus('Disconnected');
 ws.onerror = () => setStatus('Connection error');
 
 ws.onmessage = event => {
   const msg = JSON.parse(event.data);
-
   if (msg.type === 'welcome') {
     myId = msg.id;
-    setStatus(`Connected · Player ${myId}`);
+    setStatus(`Player ${myId} · WASD + mouse`);
+    local.set(0, 1, 0);
   }
-
-  if (msg.type === 'state') {
-    applyState(msg);
-  }
+  if (msg.type === 'state') applyState(msg);
 };
 
 function applyState(state) {
@@ -172,23 +139,19 @@ function applyState(state) {
 
   for (const p of state.players) {
     aliveIds.add(p.id);
-
     if (p.id === myId) {
-      local.x = p.x;
-      local.y = p.y;
-      local.z = p.z;
+      const serverPos = new THREE.Vector3(p.x, p.y, p.z);
+      if (local.distanceTo(serverPos) > 5) local.lerp(serverPos, 0.35);
       myHealth = p.health;
       continue;
     }
 
     let mesh = playerMeshes.get(p.id);
-
     if (!mesh) {
       mesh = makePlayerMesh(false);
       playerMeshes.set(p.id, mesh);
       scene.add(mesh);
     }
-
     mesh.position.set(p.x, p.y, p.z);
     mesh.rotation.y = p.rot;
   }
@@ -201,30 +164,15 @@ function applyState(state) {
   }
 
   rakeTarget.set(state.rake.x, state.rake.y, state.rake.z);
-
   if (rakeRoot) {
-    rakeRoot.position.lerp(rakeTarget, 0.65);
-
-    // Server rotation is the movement direction. The imported GLB itself
-    // has a fixed 180-degree local correction, so it faces the direction
-    // calculated by the server without changing the model's local setup.
-    if (Number.isFinite(state.rake.rot)) {
-      rakeRoot.rotation.y = state.rake.rot;
-    }
+    rakeRoot.position.lerp(rakeTarget, 0.75);
+    if (Number.isFinite(state.rake.rot)) rakeRoot.rotation.y = state.rake.rot;
   }
 
   const walking = !!state.rake.walking;
   const attacking = !!state.rake.attacking;
-
   if (walking !== lastRakeWalking || attacking !== lastRakeAttacking) {
-    if (attacking) {
-      playRakeAnimation('attack');
-    } else if (walking) {
-      playRakeAnimation('walk');
-    } else {
-      playRakeAnimation('idle');
-    }
-
+    playRakeAnimation(attacking ? 'attack' : walking ? 'walk' : 'idle');
     lastRakeWalking = walking;
     lastRakeAttacking = attacking;
   }
@@ -232,23 +180,19 @@ function applyState(state) {
   const progress = state.cycle.night
     ? 1 - Math.min(1, state.cycle.timer / 450)
     : 1 - Math.min(1, state.cycle.timer / 150);
-
   const lightX = state.cycle.night
     ? THREE.MathUtils.lerp(270, 390, progress)
     : THREE.MathUtils.lerp(150, 270, progress);
-
   sun.rotation.x = THREE.MathUtils.degToRad(lightX);
 
-  document.getElementById('cycle').textContent =
-    `${state.cycle.night ? 'NIGHT' : 'DAY'} ${Math.ceil(state.cycle.timer)}`;
-
-  document.getElementById('health').textContent =
-    `HP ${myHealth}`;
+  const cycle = document.getElementById('cycle');
+  const health = document.getElementById('health');
+  if (cycle) cycle.textContent = `${state.cycle.night ? 'NIGHT' : 'DAY'} ${Math.ceil(state.cycle.timer)}`;
+  if (health) health.textContent = `HP ${myHealth}`;
 }
 
 function sendInput() {
   if (ws.readyState !== WebSocket.OPEN) return;
-
   ws.send(JSON.stringify({
     type: 'input',
     f: keys.has('KeyW') ? 1 : 0,
@@ -260,40 +204,59 @@ function sendInput() {
 }
 
 addEventListener('keydown', e => {
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(e.code)) e.preventDefault();
   keys.add(e.code);
-  sendInput();
 });
-
-addEventListener('keyup', e => {
-  keys.delete(e.code);
-  sendInput();
-});
+addEventListener('keyup', e => keys.delete(e.code));
 
 renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
-
 document.addEventListener('pointerlockchange', () => {
-  mouseLocked = document.pointerLockElement === renderer.domElement;
+  pointerLocked = document.pointerLockElement === renderer.domElement;
+  setStatus(pointerLocked ? 'WASD to move · mouse to look · ESC releases mouse' : 'Click to capture mouse');
+});
+document.addEventListener('mousemove', e => {
+  if (!pointerLocked) return;
+  yaw -= e.movementX * 0.0025;
+  pitch -= e.movementY * 0.0025;
+  pitch = THREE.MathUtils.clamp(pitch, -1.45, 1.45);
 });
 
-document.addEventListener('mousemove', e => {
-  if (!mouseLocked) return;
-  yaw -= e.movementX * .0025;
-  pitch -= e.movementY * .0025;
-  pitch = Math.max(-1.45, Math.min(1.45, pitch));
-});
+function updateLocalMovement(dt) {
+  let forward = 0;
+  let strafe = 0;
+  if (keys.has('KeyW')) forward += 1;
+  if (keys.has('KeyS')) forward -= 1;
+  if (keys.has('KeyD')) strafe += 1;
+  if (keys.has('KeyA')) strafe -= 1;
+  if (forward === 0 && strafe === 0) return;
+
+  const length = Math.hypot(forward, strafe);
+  forward /= length;
+  strafe /= length;
+
+  const sin = Math.sin(yaw);
+  const cos = Math.cos(yaw);
+  const dx = strafe * cos + forward * sin;
+  const dz = -strafe * sin + forward * cos;
+
+  local.x += dx * PLAYER_SPEED * dt;
+  local.z += dz * PLAYER_SPEED * dt;
+  local.x = THREE.MathUtils.clamp(local.x, -180, 180);
+  local.z = THREE.MathUtils.clamp(local.z, -180, 180);
+}
 
 function render() {
   requestAnimationFrame(render);
-  const dt = clock.getDelta();
+  const dt = Math.min(clock.getDelta(), 0.05);
 
+  updateLocalMovement(dt);
+  sendInput();
   if (rakeMixer) rakeMixer.update(dt);
 
-  camera.position.set(local.x, local.y + 1, local.z);
+  camera.position.set(local.x, local.y + 1.65, local.z);
   camera.rotation.order = 'YXZ';
   camera.rotation.y = yaw;
   camera.rotation.x = pitch;
-
-  sendInput();
   renderer.render(scene, camera);
 }
 
