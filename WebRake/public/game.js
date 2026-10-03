@@ -50,6 +50,8 @@ let rakeRoot = null;
 let rakeMixer = null;
 const rakeActions = {};
 let currentRakeAction = null;
+let lastRakeWalking = false;
+let lastRakeAttacking = false;
 
 function makePlayerMesh(isLocal = false) {
   const group = new THREE.Group();
@@ -68,17 +70,26 @@ function loadRake() {
   loader.load('/assets/rake.glb', gltf => {
     rakeRoot = gltf.scene;
     rakeRoot.scale.setScalar(1);
-    rakeRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    rakeRoot.traverse(o => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
     scene.add(rakeRoot);
 
     if (gltf.animations?.length) {
       rakeMixer = new THREE.AnimationMixer(rakeRoot);
+
       for (const clip of gltf.animations) {
         const key = clip.name.toLowerCase().replace(/[^a-z0-9]/g, '');
         rakeActions[key] = rakeMixer.clipAction(clip);
         console.log('Rake animation:', clip.name);
       }
+
       playRakeAnimation('idle');
+    } else {
+      console.warn('Rake GLB contains no animations.');
     }
   }, undefined, err => {
     console.error('Failed to load Rake GLB:', err);
@@ -88,68 +99,145 @@ function loadRake() {
 
 function playRakeAnimation(name) {
   if (!rakeMixer) return;
+
   const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
   let action = rakeActions[normalized];
+
   if (!action) {
-    const found = Object.keys(rakeActions).find(k => k.includes(normalized) || normalized.includes(k));
+    const found = Object.keys(rakeActions).find(
+      k => k.includes(normalized) || normalized.includes(k)
+    );
     if (found) action = rakeActions[found];
   }
+
   if (!action || currentRakeAction === action) return;
-  if (currentRakeAction) currentRakeAction.fadeOut(.15);
+
+  if (currentRakeAction) {
+    currentRakeAction.fadeOut(.15);
+  }
+
   action.reset().fadeIn(.15).play();
   currentRakeAction = action;
 }
 
-function setStatus(text) { document.getElementById('status').textContent = text; }
+function setStatus(text) {
+  document.getElementById('status').textContent = text;
+}
 
-const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+const ws = new WebSocket(
+  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+);
+
 ws.onopen = () => setStatus('Connected · finding players...');
 ws.onclose = () => setStatus('Disconnected');
 ws.onerror = () => setStatus('Connection error');
+
 ws.onmessage = event => {
   const msg = JSON.parse(event.data);
+
   if (msg.type === 'welcome') {
     myId = msg.id;
     setStatus(`Connected · Player ${myId}`);
   }
-  if (msg.type === 'state') applyState(msg);
+
+  if (msg.type === 'state') {
+    applyState(msg);
+  }
 };
 
 function applyState(state) {
   const aliveIds = new Set();
+
   for (const p of state.players) {
     aliveIds.add(p.id);
+
     if (p.id === myId) {
-      local.x = p.x; local.y = p.y; local.z = p.z; myHealth = p.health;
+      local.x = p.x;
+      local.y = p.y;
+      local.z = p.z;
+      myHealth = p.health;
       continue;
     }
+
     let mesh = playerMeshes.get(p.id);
-    if (!mesh) { mesh = makePlayerMesh(false); playerMeshes.set(p.id, mesh); scene.add(mesh); }
+
+    if (!mesh) {
+      mesh = makePlayerMesh(false);
+      playerMeshes.set(p.id, mesh);
+      scene.add(mesh);
+    }
+
     mesh.position.set(p.x, p.y, p.z);
     mesh.rotation.y = p.rot;
   }
+
   for (const [id, mesh] of playerMeshes) {
-    if (!aliveIds.has(id)) { scene.remove(mesh); playerMeshes.delete(id); }
+    if (!aliveIds.has(id)) {
+      scene.remove(mesh);
+      playerMeshes.delete(id);
+    }
   }
 
-  rakeTarget.set(state.rake.x, state.rake.y, state.rake.z);
-  if (rakeRoot) rakeRoot.position.lerp(rakeTarget, .5);
-  playRakeAnimation(state.rake.attacking ? 'attack' : (state.rake.walking ? 'walk' : 'idle'));
+  // ================================================
+  // AUTHORITATIVE RAKE POSITION
+  // ================================================
+
+  rakeTarget.set(
+    state.rake.x,
+    state.rake.y,
+    state.rake.z
+  );
+
+  if (rakeRoot) {
+    // Smooth visual interpolation without stopping the server movement.
+    rakeRoot.position.lerp(rakeTarget, 0.65);
+
+    // Server calculates the actual facing direction.
+    if (Number.isFinite(state.rake.rot)) {
+      rakeRoot.rotation.y = state.rake.rot;
+    }
+  }
+
+  const walking = !!state.rake.walking;
+  const attacking = !!state.rake.attacking;
+
+  if (walking !== lastRakeWalking || attacking !== lastRakeAttacking) {
+    if (attacking) {
+      playRakeAnimation('attack');
+    } else if (walking) {
+      playRakeAnimation('walk');
+    } else {
+      playRakeAnimation('idle');
+    }
+
+    lastRakeWalking = walking;
+    lastRakeAttacking = attacking;
+  }
+
+  // ================================================
+  // SHARED DAY/NIGHT
+  // ================================================
 
   const progress = state.cycle.night
     ? 1 - Math.min(1, state.cycle.timer / 450)
     : 1 - Math.min(1, state.cycle.timer / 150);
+
   const lightX = state.cycle.night
     ? THREE.MathUtils.lerp(270, 390, progress)
     : THREE.MathUtils.lerp(150, 270, progress);
+
   sun.rotation.x = THREE.MathUtils.degToRad(lightX);
 
-  document.getElementById('cycle').textContent = `${state.cycle.night ? 'NIGHT' : 'DAY'} ${Math.ceil(state.cycle.timer)}`;
-  document.getElementById('health').textContent = `HP ${myHealth}`;
+  document.getElementById('cycle').textContent =
+    `${state.cycle.night ? 'NIGHT' : 'DAY'} ${Math.ceil(state.cycle.timer)}`;
+
+  document.getElementById('health').textContent =
+    `HP ${myHealth}`;
 }
 
 function sendInput() {
   if (ws.readyState !== WebSocket.OPEN) return;
+
   ws.send(JSON.stringify({
     type: 'input',
     f: keys.has('KeyW') ? 1 : 0,
@@ -160,12 +248,29 @@ function sendInput() {
   }));
 }
 
-addEventListener('keydown', e => { keys.add(e.code); sendInput(); });
-addEventListener('keyup', e => { keys.delete(e.code); sendInput(); });
-renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
-document.addEventListener('pointerlockchange', () => { mouseLocked = document.pointerLockElement === renderer.domElement; });
+addEventListener('keydown', e => {
+  keys.add(e.code);
+  sendInput();
+});
+
+addEventListener('keyup', e => {
+  keys.delete(e.code);
+  sendInput();
+});
+
+renderer.domElement.addEventListener(
+  'click',
+  () => renderer.domElement.requestPointerLock()
+);
+
+document.addEventListener('pointerlockchange', () => {
+  mouseLocked =
+    document.pointerLockElement === renderer.domElement;
+});
+
 document.addEventListener('mousemove', e => {
   if (!mouseLocked) return;
+
   yaw -= e.movementX * .0025;
   pitch -= e.movementY * .0025;
   pitch = Math.max(-1.45, Math.min(1.45, pitch));
@@ -173,13 +278,25 @@ document.addEventListener('mousemove', e => {
 
 function render() {
   requestAnimationFrame(render);
+
   const dt = clock.getDelta();
-  if (rakeMixer) rakeMixer.update(dt);
-  camera.position.set(local.x, local.y + 1, local.z);
+
+  if (rakeMixer) {
+    rakeMixer.update(dt);
+  }
+
+  camera.position.set(
+    local.x,
+    local.y + 1,
+    local.z
+  );
+
   camera.rotation.order = 'YXZ';
   camera.rotation.y = yaw;
   camera.rotation.x = pitch;
+
   sendInput();
+
   renderer.render(scene, camera);
 }
 
