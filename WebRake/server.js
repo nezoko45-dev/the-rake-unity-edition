@@ -17,6 +17,7 @@ const ATTACK_DAMAGE = 45;
 const ATTACK_COOLDOWN = 8;
 const PLAYER_SPEED = 7;
 const RAKE_SPEED = 7;
+const RAKE_CHASE_SPEED = 19;
 
 const players = new Map();
 const sockets = new Map();
@@ -25,12 +26,22 @@ let cycleTimer = DAY_LENGTH;
 let isNight = false;
 let lastTick = Date.now();
 let attackCooldown = 0;
-const rake = { x: 0, y: 0, z: 0, spawnX: 0, spawnY: 0, spawnZ: 0, attacking: false, walking: false };
+
+const rake = {
+  x: 0,
+  y: 0,
+  z: 0,
+  spawnX: 0,
+  spawnY: 0,
+  spawnZ: 0,
+  rot: 0,
+  attacking: false,
+  walking: false
+};
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/three', express.static(path.join(__dirname, 'node_modules/three')));
 
-// The GLB already in the Unity-edition repo.
 const rakeGlb = path.join(__dirname, '..', 'Assets', 'rake 45 more improvements!.glb');
 app.get('/assets/rake.glb', (req, res) => {
   if (!fs.existsSync(rakeGlb)) {
@@ -39,7 +50,13 @@ app.get('/assets/rake.glb', (req, res) => {
   res.sendFile(rakeGlb);
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, players: players.size, night: isNight, timer: cycleTimer }));
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  players: players.size,
+  night: isNight,
+  timer: cycleTimer,
+  rake: { x: rake.x, y: rake.y, z: rake.z, walking: rake.walking, attacking: rake.attacking }
+}));
 
 function send(ws, message) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
@@ -62,9 +79,22 @@ function snapshot() {
   return {
     type: 'state',
     cycle: { timer: cycleTimer, night: isNight },
-    rake: { x: rake.x, y: rake.y, z: rake.z, attacking: rake.attacking, walking: rake.walking },
+    rake: {
+      x: rake.x,
+      y: rake.y,
+      z: rake.z,
+      rot: rake.rot,
+      attacking: rake.attacking,
+      walking: rake.walking
+    },
     players: [...players.values()].map(p => ({
-      id: p.id, x: p.x, y: p.y, z: p.z, rot: p.rot, health: p.health, name: p.name
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      rot: p.rot,
+      health: p.health,
+      name: p.name
     }))
   };
 }
@@ -86,8 +116,7 @@ wss.on('connection', (ws) => {
     z: spawn.z,
     rot: 0,
     health: 100,
-    input: { f: 0, b: 0, l: 0, r: 0 },
-    connected: true
+    input: { f: 0, b: 0, l: 0, r: 0 }
   };
 
   players.set(id, player);
@@ -122,15 +151,17 @@ wss.on('connection', (ws) => {
 });
 
 function update(dt) {
-  // One authoritative clock for everyone.
   cycleTimer -= dt;
+
   if (cycleTimer <= 0) {
     if (isNight) {
       isNight = false;
       cycleTimer = DAY_LENGTH;
+      console.log('RAKE: DAY - RETREATING');
     } else {
       isNight = true;
       cycleTimer = NIGHT_LENGTH;
+      console.log('RAKE: NIGHT - HUNTING');
     }
   }
 
@@ -146,38 +177,69 @@ function update(dt) {
     p.z = Math.max(-180, Math.min(180, p.z));
   }
 
-  // Authoritative Rake AI: day = retreat, night = chase.
   rake.attacking = false;
   rake.walking = false;
 
   if (!isNight) {
-    rake.walking = moveRakeToward(rake.spawnX, rake.spawnY, rake.spawnZ, RAKE_SPEED, dt);
+    // During the day the Rake always returns to its exact spawn.
+    rake.walking = moveRakeToward(
+      rake.spawnX,
+      rake.spawnY,
+      rake.spawnZ,
+      RAKE_SPEED,
+      dt
+    );
   } else {
+    // At night find the nearest living CharacterController/player.
     let closest = null;
     let best = Infinity;
+
     for (const p of players.values()) {
       if (p.health <= 0) continue;
-      const d = Math.hypot(p.x - rake.x, p.z - rake.z);
-      if (d < best) { best = d; closest = p; }
+
+      const d = Math.hypot(
+        p.x - rake.x,
+        p.z - rake.z
+      );
+
+      if (d < best) {
+        best = d;
+        closest = p;
+      }
     }
 
     if (closest) {
       if (best > ATTACK_DISTANCE) {
-        rake.walking = moveRakeToward(closest.x, closest.y, closest.z, RAKE_SPEED * 1.5, dt);
+        rake.walking = moveRakeToward(
+          closest.x,
+          closest.y,
+          closest.z,
+          RAKE_CHASE_SPEED,
+          dt
+        );
       } else {
         rake.attacking = true;
+        rake.walking = false;
       }
 
       if (best <= ATTACK_DISTANCE && attackCooldown <= 0) {
         closest.health -= ATTACK_DAMAGE;
         attackCooldown = ATTACK_COOLDOWN;
+
+        console.log(
+          `RAKE: attacked Player ${closest.id} for ${ATTACK_DAMAGE}`
+        );
+
         if (closest.health <= 0) {
           closest.health = 0;
+
           const s = randomSpawn();
           closest.x = s.x;
           closest.y = s.y;
           closest.z = s.z;
           closest.health = 100;
+
+          console.log(`RAKE: Player ${closest.id} respawned`);
         }
       }
     }
@@ -189,19 +251,29 @@ function update(dt) {
 function moveRakeToward(tx, ty, tz, speed, dt) {
   const dx = tx - rake.x;
   const dz = tz - rake.z;
-  const d = Math.hypot(dx, dz);
-  if (d < 0.05) return false;
-  const step = Math.min(d, speed * dt);
-  rake.x += (dx / d) * step;
-  rake.z += (dz / d) * step;
+  const distance = Math.hypot(dx, dz);
+
+  if (distance <= 0.05) {
+    return false;
+  }
+
+  // Face the direction the Rake is actually moving.
+  rake.rot = Math.atan2(dx, dz);
+
+  const step = Math.min(distance, speed * dt);
+
+  rake.x += (dx / distance) * step;
+  rake.z += (dz / distance) * step;
   rake.y = ty;
-  return true;
+
+  return step > 0;
 }
 
 setInterval(() => {
   const now = Date.now();
   const dt = Math.min(0.1, (now - lastTick) / 1000);
   lastTick = now;
+
   update(dt);
   broadcast(snapshot());
 }, 50);
@@ -209,4 +281,6 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`The Rake server running at http://localhost:${PORT}`);
   console.log(`LAN: http://<YOUR-PC-IP>:${PORT}`);
+  console.log(`Day: ${DAY_LENGTH}s | Night: ${NIGHT_LENGTH}s`);
+  console.log(`Rake chase speed: ${RAKE_CHASE_SPEED}`);
 });
