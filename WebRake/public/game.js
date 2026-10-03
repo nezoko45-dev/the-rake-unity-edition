@@ -68,18 +68,40 @@ function makePlayerMesh(isLocal = false) {
 function loadRake() {
   const loader = new GLTFLoader();
   loader.load('/assets/rake.glb', gltf => {
-    rakeRoot = gltf.scene;
-    rakeRoot.scale.setScalar(1);
-    rakeRoot.traverse(o => {
+    // Keep a clean root transform for the networked Rake position.
+    rakeRoot = new THREE.Group();
+    rakeRoot.name = 'RakeRoot';
+    scene.add(rakeRoot);
+
+    // Put the imported model underneath the root and normalize its local transform.
+    const model = gltf.scene;
+    model.name = 'RakeModel';
+    model.position.set(0, 0, 0);
+    model.rotation.set(0, THREE.MathUtils.degToRad(180), 0);
+    model.scale.setScalar(1);
+
+    // Reset the armature and other direct children so the model's internal
+    // hierarchy does not introduce an unwanted offset from the ground/root.
+    model.traverse(o => {
+      if (o.isBone || o.name.toLowerCase().includes('armature')) {
+        o.position.set(o.position.x, o.position.y, o.position.z);
+      }
+
       if (o.isMesh) {
         o.castShadow = true;
         o.receiveShadow = true;
       }
     });
-    scene.add(rakeRoot);
+
+    rakeRoot.add(model);
+
+    // The root is the authoritative ground position. The imported model
+    // is deliberately local Y=0 and rotated 180 degrees to face forward.
+    rakeRoot.position.set(0, 0, 0);
+    rakeRoot.rotation.set(0, 0, 0);
 
     if (gltf.animations?.length) {
-      rakeMixer = new THREE.AnimationMixer(rakeRoot);
+      rakeMixer = new THREE.AnimationMixer(model);
 
       for (const clip of gltf.animations) {
         const key = clip.name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -178,21 +200,14 @@ function applyState(state) {
     }
   }
 
-  // ================================================
-  // AUTHORITATIVE RAKE POSITION
-  // ================================================
-
-  rakeTarget.set(
-    state.rake.x,
-    state.rake.y,
-    state.rake.z
-  );
+  rakeTarget.set(state.rake.x, state.rake.y, state.rake.z);
 
   if (rakeRoot) {
-    // Smooth visual interpolation without stopping the server movement.
     rakeRoot.position.lerp(rakeTarget, 0.65);
 
-    // Server calculates the actual facing direction.
+    // Server rotation is the movement direction. The imported GLB itself
+    // has a fixed 180-degree local correction, so it faces the direction
+    // calculated by the server without changing the model's local setup.
     if (Number.isFinite(state.rake.rot)) {
       rakeRoot.rotation.y = state.rake.rot;
     }
@@ -213,10 +228,6 @@ function applyState(state) {
     lastRakeWalking = walking;
     lastRakeAttacking = attacking;
   }
-
-  // ================================================
-  // SHARED DAY/NIGHT
-  // ================================================
 
   const progress = state.cycle.night
     ? 1 - Math.min(1, state.cycle.timer / 450)
@@ -258,19 +269,14 @@ addEventListener('keyup', e => {
   sendInput();
 });
 
-renderer.domElement.addEventListener(
-  'click',
-  () => renderer.domElement.requestPointerLock()
-);
+renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
 
 document.addEventListener('pointerlockchange', () => {
-  mouseLocked =
-    document.pointerLockElement === renderer.domElement;
+  mouseLocked = document.pointerLockElement === renderer.domElement;
 });
 
 document.addEventListener('mousemove', e => {
   if (!mouseLocked) return;
-
   yaw -= e.movementX * .0025;
   pitch -= e.movementY * .0025;
   pitch = Math.max(-1.45, Math.min(1.45, pitch));
@@ -278,25 +284,16 @@ document.addEventListener('mousemove', e => {
 
 function render() {
   requestAnimationFrame(render);
-
   const dt = clock.getDelta();
 
-  if (rakeMixer) {
-    rakeMixer.update(dt);
-  }
+  if (rakeMixer) rakeMixer.update(dt);
 
-  camera.position.set(
-    local.x,
-    local.y + 1,
-    local.z
-  );
-
+  camera.position.set(local.x, local.y + 1, local.z);
   camera.rotation.order = 'YXZ';
   camera.rotation.y = yaw;
   camera.rotation.x = pitch;
 
   sendInput();
-
   renderer.render(scene, camera);
 }
 
