@@ -31,11 +31,8 @@
     ],
     "extraResources": [
       {
-        "from": "../Assets",
-        "to": "Assets",
-        "filter": [
-          "**/*"
-        ]
+        "from": "../Assets/rake 45 more improvements!.glb",
+        "to": "Assets/rake 45 more improvements!.glb"
       }
     ],
     "win": {
