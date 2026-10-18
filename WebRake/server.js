@@ -19,8 +19,15 @@ let attackCooldown = 0, rakeStun = 0, rakeHealth = 1000, rakeCharge = 0, rakePar
 const rake = { x: 0, y: 0, z: 0, rot: 0, attacking: false, walking: false, stunned: false, health: rakeHealth };
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/three', express.static(path.join(__dirname, 'node_modules/three')));
-const rakeGlb = path.join(__dirname, '..', 'Assets', 'rake 45 more improvements!.glb');
-app.get('/assets/rake.glb', (req, res) => fs.existsSync(rakeGlb) ? res.sendFile(rakeGlb) : res.status(404).send('No bundled Rake GLB. Use the in-game GLB picker.'));
+const rakeCandidates = [
+ path.join(__dirname, '..', 'Assets', 'rake 45 more improvements!.glb'),
+ path.join(process.resourcesPath || '', 'Assets', 'rake 45 more improvements!.glb'),
+ path.join(process.resourcesPath || '', 'Assets', 'rake.glb')
+];
+app.get('/assets/rake.glb', (req, res) => {
+ const file = rakeCandidates.find(candidate => candidate && fs.existsSync(candidate));
+ return file ? res.sendFile(file) : res.status(404).send('No bundled Rake GLB. Use the in-game GLB picker.');
+});
 app.get('/health', (req, res) => res.json({ ok:true, players:players.size, bots:bots.size, night:isNight, timer:cycleTimer, rake }));
 
 function send(ws, msg) { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg)); }
@@ -88,7 +95,7 @@ wss.on('connection',ws=>{
  send(ws,{type:'welcome',id,maxPlayers:MAX_PLAYERS,playerSpeed:PLAYER_SPEED});send(ws,snapshot());broadcast({type:'join',player:{id,x:p.x,y:p.y,z:p.z,rot:0,health:100,name:p.name}},id);
  ws.on('message',raw=>{
   let msg;try{msg=JSON.parse(raw.toString());}catch{return;}const actor=players.get(id);if(!actor)return;
-  if(msg.type==='input'){actor.input={f:clamp(msg.f),b:clamp(msg.b),l:clamp(msg.l),r:clamp(msg.r)};if(Number.isFinite(msg.rot))actor.rot=msg.rot;}
+  if(msg.type==='input'){actor.input={f:clamp(msg.f),b:clamp(msg.b),l:clamp(msg.l),r:clamp(msg.r),wx:clamp(msg.wx),wz:clamp(msg.wz)};if(Number.isFinite(msg.rot))actor.rot=msg.rot;}
   if(msg.type==='charge'){actor.chargeUntil=Date.now()+1100;actor.rot=Number.isFinite(msg.rot)?msg.rot:actor.rot;}
   if(msg.type==='attack')hitRake(actor,Date.now()<actor.chargeUntil);
   if(msg.type==='mode'&&msg.mode==='ai'){const count=Math.max(1,Math.min(6,Number(msg.bots)||3));while(bots.size<count){const bid='AI-'+(bots.size+1);bots.set(bid,newPlayer(bid,'Ranger '+(bots.size+1),true));}while(bots.size>count)bots.delete([...bots.keys()].pop());}
@@ -108,7 +115,7 @@ function update(dt){
    else hitRake(p,now<p.chargeUntil);
    // If the Rake is close, AI fighters hold their ground instead of orbiting.
   }else{
-   const x=p.input.r-p.input.l,z=p.input.b-p.input.f,len=Math.hypot(x,z);
+   const x=Number.isFinite(p.input.wx)?p.input.wx:(p.input.r-p.input.l),z=Number.isFinite(p.input.wz)?p.input.wz:(p.input.b-p.input.f),len=Math.hypot(x,z);
    if(len>0){p.x+=x/(len||1)*PLAYER_SPEED*dt;p.z+=z/(len||1)*PLAYER_SPEED*dt;}
    p.x=Math.max(-ARENA,Math.min(ARENA,p.x));p.z=Math.max(-ARENA,Math.min(ARENA,p.z));
   }
@@ -134,4 +141,12 @@ function update(dt){
  if(rakeHealth<=0){rakeHealth=1000;rake.health=rakeHealth;rakeStun=now+5000;}
 }
 setInterval(()=>{const now=Date.now(),dt=Math.min(.1,(now-lastTick)/1000);lastTick=now;update(dt);broadcast(snapshot());},50);
-server.listen(PORT,()=>console.log('The Rake server running at http://localhost:'+PORT));
+function startServer(port = PORT) {
+ return new Promise((resolve, reject) => {
+  const onError = error => { server.off('listening', onListening); reject(error); };
+  const onListening = () => { server.off('error', onError); const actualPort = server.address().port; console.log('The Rake server running at http://127.0.0.1:' + actualPort); resolve(actualPort); };
+  server.once('error', onError); server.once('listening', onListening); server.listen(port, '127.0.0.1');
+ });
+}
+if (require.main === module) startServer().catch(err => { console.error(err); process.exitCode = 1; });
+module.exports = { startServer };
