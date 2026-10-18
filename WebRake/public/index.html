@@ -3,21 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>The Rake</title>
+  <title>The Rake — Unity Edition</title>
   <link rel="stylesheet" href="style.css">
-  <script type="importmap">
-  {"imports":{"three":"/three/build/three.module.js"}}
-  </script>
+  <script type="importmap">{"imports":{"three":"/three/build/three.module.js"}}</script>
 </head>
 <body>
   <div id="hud">
-    <div class="title">THE RAKE</div>
-    <div id="status">Connecting...</div>
-    <div id="cycle">DAY 150</div>
-    <div id="health">HP 100</div>
+    <div class="title">THE RAKE <span>UNITY EDITION</span></div>
+    <div id="status">Connecting to game server…</div>
+    <div class="stats"><div id="cycle">NIGHT 450</div><div id="health">HP 100</div><div id="rake-health">RAKE 1000</div><div id="bots-status">ALLIES 0</div></div>
+    <section class="panel">
+      <label for="mode">GAME MODE</label>
+      <select id="mode"><option value="multiplayer">Multiplayer server</option><option value="ai">Solo + AI squad</option><option value="solo">Solo survival</option></select>
+      <label for="bot-count">AI teammates</label>
+      <select id="bot-count"><option value="1">1 Ranger</option><option value="3" selected>3 Rangers</option><option value="6">6 Rangers</option></select>
+      <label for="model-picker">RAKE MODEL (.glb / .gltf)</label>
+      <input id="model-picker" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json">
+      <p class="hint">Imported models are centered at their feet and scaled to the game root. Embedded animations are detected automatically.</p>
+    </section>
   </div>
   <div id="crosshair">+</div>
-  <div id="help">WASD to move · Mouse to look · Click to capture mouse</div>
+  <div id="help">WASD move · Mouse look · SPACE charge / stun · F attack · ESC release mouse</div>
   <script type="module" src="game.js"></script>
 </body>
 </html>
