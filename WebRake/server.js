@@ -68,7 +68,7 @@ function moveToward(actor,target,speed,dt) {
  if(d<.1)return false;
  actor.rot=Math.atan2(dx,dz);
  const route=actor.route;
- if(!route||!actor.routeAt||Date.now()>actor.routeAt||actor.routeTargetDist>8||Math.random()<.015){
+ if(!route||!actor.routeAt||Date.now()>actor.routeAt||Math.random()<.015){
    actor.route=astar(actor,target);actor.routeAt=Date.now()+900;actor.routeTargetDist=d;
  }
  let waypoint=actor.route?.[Math.min(1,actor.route.length-1)]||target;
