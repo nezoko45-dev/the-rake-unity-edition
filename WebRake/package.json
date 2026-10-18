@@ -27,16 +27,25 @@
       "server.js",
       "public/**/*",
       "node_modules/**/*",
-      "package.json",
-      "../Assets/**/*"
+      "package.json"
     ],
     "extraResources": [
-      { "from": "../Assets", "to": "Assets", "filter": ["**/*"] }
+      {
+        "from": "../Assets",
+        "to": "Assets",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
-      "target": ["portable"],
-      "artifactName": "The-Rake-Unity-Edition-Setup.exe"
+      "target": [
+        "portable"
+      ],
+      "artifactName": "The-Rake-Unity-Edition.exe"
     },
-    "directories": { "output": "dist" }
+    "directories": {
+      "output": "dist"
+    }
   }
 }
