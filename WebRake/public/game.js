@@ -42,6 +42,9 @@ let myHealth = 100;
 let yaw = 0;
 let pitch = 0;
 let pointerLocked = false;
+let gameMode = 'multiplayer';
+let chargeReady = true;
+let attackHeld = false;
 const PLAYER_SPEED = 7;
 
 let rakeRoot = null;
@@ -132,6 +135,7 @@ ws.onmessage = event => {
     local.set(0, 1, 0);
   }
   if (msg.type === 'state') applyState(msg);
+  if (msg.type === 'full') setStatus(msg.message || 'Server full');
 };
 
 function applyState(state) {
@@ -154,6 +158,7 @@ function applyState(state) {
     }
     mesh.position.set(p.x, p.y, p.z);
     mesh.rotation.y = p.rot;
+    if (p.isBot) mesh.children[0].material.color.setHex(0x39c8a0);
   }
 
   for (const [id, mesh] of playerMeshes) {
@@ -189,6 +194,10 @@ function applyState(state) {
   const health = document.getElementById('health');
   if (cycle) cycle.textContent = `${state.cycle.night ? 'NIGHT' : 'DAY'} ${Math.ceil(state.cycle.timer)}`;
   if (health) health.textContent = `HP ${myHealth}`;
+  const rakeHp = document.getElementById('rake-health');
+  if (rakeHp) rakeHp.textContent = `RAKE ${Math.ceil(state.rake.health ?? 1000)}`;
+  const botsEl = document.getElementById('bots-status');
+  if (botsEl) botsEl.textContent = `ALLIES ${state.players.filter(p=>p.isBot).length}`;
 }
 
 function sendInput() {
@@ -209,7 +218,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => keys.delete(e.code));
 
-renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+renderer.domElement.addEventListener('click', () => { if (document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock(); });\n\nconst modeSelect = document.getElementById('mode');\nif (modeSelect) modeSelect.addEventListener('change', () => {\n  gameMode = modeSelect.value;\n  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type:'mode', mode:gameMode, bots:document.getElementById('bot-count')?.value || 3}));\n  setStatus(gameMode === 'solo' ? 'SOLO · survive the hunt' : gameMode === 'ai' ? 'AI SQUAD · fight alongside rangers' : 'MULTIPLAYER · connected to server');\n});\nconst botCount = document.getElementById('bot-count');\nif (botCount) botCount.addEventListener('change', () => { if(ws.readyState===WebSocket.OPEN && gameMode==='ai') ws.send(JSON.stringify({type:'mode',mode:'ai',bots:botCount.value})); });\nconst modelPicker = document.getElementById('model-picker');\nif (modelPicker) modelPicker.addEventListener('change', e => { const file=e.target.files?.[0]; if(file) loadCustomRake(file); });\nfunction loadCustomRake(file) {\n  const url=URL.createObjectURL(file);\n  new GLTFLoader().load(url, gltf => {\n    if (rakeRoot) scene.remove(rakeRoot);\n    rakeRoot = new THREE.Group(); rakeRoot.name='RakeRoot'; scene.add(rakeRoot);\n    const model=gltf.scene; model.name='RakeModel';\n    model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});\n    // Normalize imported asset around its feet and fit it to the gameplay root.\n    model.updateMatrixWorld(true); const bounds=new THREE.Box3().setFromObject(model);\n    const size=bounds.getSize(new THREE.Vector3()); const center=bounds.getCenter(new THREE.Vector3());\n    const maxDim=Math.max(size.x,size.y,size.z)||1; model.scale.setScalar(3.2/maxDim);\n    model.position.set(-center.x*model.scale.x, -bounds.min.y*model.scale.y, -center.z*model.scale.z);\n    rakeRoot.add(model); rakeMixer=null; Object.keys(rakeActions).forEach(k=>delete rakeActions[k]); currentRakeAction=null;\n    if(gltf.animations?.length){rakeMixer=new THREE.AnimationMixer(model);for(const clip of gltf.animations){const key=clip.name.toLowerCase().replace(/[^a-z0-9]/g,'');rakeActions[key]=rakeMixer.clipAction(clip);}playRakeAnimation('idle');}\n    setStatus('Loaded '+file.name+' · '+gltf.animations.length+' animation(s)'); URL.revokeObjectURL(url);\n  },undefined,err=>{console.error(err);setStatus('Could not load GLB/GLTF model');URL.revokeObjectURL(url);});\n}
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === renderer.domElement;
   setStatus(pointerLocked ? 'WASD to move · mouse to look · ESC releases mouse' : 'Click to capture mouse');
