@@ -58,29 +58,52 @@ const player={kind:'player',pos:controls.getObject().position,hp:100,maxHp:100,a
 function randomAISpawn(){for(let tries=0;tries<800;tries++){const x=(rand()-.5)*320,z=(rand()-.5)*320;if(Math.hypot(x,z)<18||Math.hypot(x+43,z+43)<10)continue;if(!walkablePoint(x,z))continue;return new THREE.Vector3(x,0,z)}return new THREE.Vector3(70,0,-70)}
 const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeActor('ally',spawn.x,spawn.z,[0x536d87,0x89775e,0x677d6a,0x82718c][i]);a.spawn=spawn.clone();allies.push(a)}
 loadRake();
-// Music tracks are loaded from the repository's Assets folder. Try common audio formats
-// so the track works regardless of the extension used in the uploaded assets.
-const dayMusic=new Audio('https://raw.githubusercontent.com/nezoko45-dev/the-rake-unity-edition/main/Assets/Welcome%20to%20Whispering%20Pines.mp3');
-const nightMusic=new Audio('https://raw.githubusercontent.com/nezoko45-dev/the-rake-unity-edition/main/Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3');
-for(const [label,audio] of [['day',dayMusic],['night',nightMusic]]){
- audio.loop=true;audio.preload='auto';audio.volume=.55;
- audio.addEventListener('error',()=>{console.error(label+' music failed to load:',audio.currentSrc,audio.error);notify('Music file failed to load — see Chrome Console for details')});
+// Use paths relative to this module, so GitHub Pages serves the files from
+// /the-rake-unity-edition/Assets/ even when the game is hosted in a subfolder.
+const dayMusic=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url).href);
+const nightMusic=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url).href);
+const musicTracks={day:dayMusic,night:nightMusic};
+for(const [label,audio] of Object.entries(musicTracks)){
+ audio.loop=true;
+ audio.preload='auto';
+ audio.volume=.55;
+ audio.addEventListener('error',()=>{
+   console.error(label+' music failed to load:',audio.currentSrc,audio.error);
+   notify('Could not load '+label+' music. Check the Assets filenames and Chrome Console.');
+ });
  audio.addEventListener('playing',()=>console.info(label+' music is playing:',audio.currentSrc));
+ audio.addEventListener('pause',()=>console.info(label+' music paused'));
 }
 let musicMode='',musicStarted=false;
+async function playMusicMode(mode){
+ const active=musicTracks[mode]||dayMusic;
+ const activeMode=active===nightMusic?'night':'day';
+ const other=active===nightMusic?dayMusic:nightMusic;
+ other.pause();
+ if(!other.paused)other.currentTime=0;
+ if(musicMode===activeMode&&!active.paused)return;
+ musicMode=activeMode;
+ try{
+   await active.play();
+   console.info('Game music started:',activeMode,active.currentSrc);
+ }catch(err){
+   musicMode='';
+   console.error('Chrome blocked or failed to play '+activeMode+' music:',err,'URL:',active.currentSrc);
+   notify('Music did not start. Click ENTER THE FOREST again, then check Chrome Console.');
+ }
+}
 function updateMusic(isNight){
  if(!musicStarted)return;
- const mode=isNight?'night':'day';if(mode===musicMode)return;
- const active=isNight?nightMusic:dayMusic,other=isNight?dayMusic:nightMusic;
- other.pause();other.currentTime=0;musicMode=mode;
- active.play().catch(err=>{console.error('Chrome audio playback failed:',err);musicMode='';notify('Music playback failed — check Chrome Console and volume')});
+ const mode=isNight?'night':'day';
+ if(mode!==musicMode)void playMusicMode(mode);
 }
 window.__startGameAudio=()=>{
- musicStarted=true;musicMode='';
- night=(elapsed%DAY_LENGTH)>=DAY_LENGTH*.25;
- const active=night?nightMusic:dayMusic,other=night?dayMusic:nightMusic;
- other.pause();other.currentTime=0;musicMode=night?'night':'day';
- active.play().catch(err=>{console.error('Chrome audio playback failed:',err);musicMode='';notify('Music playback failed — check Chrome Console and volume')});
+ musicStarted=true;
+ const mode=(elapsed%DAY_LENGTH)>=DAY_LENGTH*.25?'night':'day';
+ night=mode==='night';
+ // Called directly by the ENTER button's click handler, satisfying Chrome's
+ // user-gesture requirement for audio playback.
+ void playMusicMode(mode);
 };
 const clock=new THREE.Clock();let elapsed=0,night=false,gameStarted=false;const DAY_LENGTH=600;const keys={};addEventListener('keydown',e=>{if(e.code==='KeyF'&&!e.repeat){setFlashlight(!flashlightOn);return}keys[e.code]=true});addEventListener('keyup',e=>keys[e.code]=false);
 document.getElementById('start').onclick=()=>{gameStarted=true;window.__gameStartedRequested=true;if(window.__startGameAudio)window.__startGameAudio();document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look');}};controls.addEventListener('lock',()=>document.getElementById('overlay').style.display='none');controls.addEventListener('unlock',()=>{if(!gameStarted)document.getElementById('overlay').style.display='grid';else document.getElementById('overlay').style.display='none'});renderer.domElement.addEventListener('click',()=>{if(gameStarted&&player.alive&&!controls.isLocked)controls.lock()});
