@@ -58,21 +58,29 @@ function distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r)}
 function clearMove(actor,dx,dz){const nx=actor.pos.x+dx,nz=actor.pos.z+dz;if(!blocked(nx,nz)){actor.pos.x=nx;actor.pos.z=nz}else if(!blocked(actor.pos.x+dx,actor.pos.z))actor.pos.x+=dx;else if(!blocked(actor.pos.x,actor.pos.z+dz))actor.pos.z+=dz;actor.group.position.x=actor.pos.x;actor.group.position.z=actor.pos.z}
 function nearestTarget(from,includePlayer=true){let best=null,bd=Infinity;if(includePlayer&&player.alive){best=player;bd=distance(from,player.pos)}for(const a of allies){if(a.alive){const d=distance(from,a.pos);if(d<bd){best=a;bd=d}}}return {target:best,d:bd}}
-// Continuous visibility-graph pathfinding around circular tree clearances (no grid or raycasts).
+// Efficient continuous-space waypoint pathfinding around circular tree clearances.
+// The graph is built only from obstacles near the straight route; no grids or raycasts.
 const NAV_CLEARANCE=.55;
 function walkablePoint(x,z){return x>-71&&x<71&&z>-71&&z<71&&!obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+NAV_CLEARANCE)}
-function segmentClear(a,b,obs){for(const o of obs){const vx=b.x-a.x,vz=b.z-a.z,den=vx*vx+vz*vz;const t=den?THREE.MathUtils.clamp(((o.x-a.x)*vx+(o.z-a.z)*vz)/den,0,1):0;const px=a.x+vx*t,pz=a.z+vz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+NAV_CLEARANCE)return false}return true}
+function segmentClear(a,b,obs){const vx=b.x-a.x,vz=b.z-a.z,den=vx*vx+vz*vz;for(const o of obs){const t=den?THREE.MathUtils.clamp(((o.x-a.x)*vx+(o.z-a.z)*vz)/den,0,1):0;if(Math.hypot(a.x+vx*t-o.x,a.z+vz*t-o.z)<o.r+NAV_CLEARANCE)return false}return true}
 function astar(start,end){
- const directObs=obstacles.filter(o=>{const minX=Math.min(start.x,end.x)-18,maxX=Math.max(start.x,end.x)+18,minZ=Math.min(start.z,end.z)-18,maxZ=Math.max(start.z,end.z)+18;return o.x>=minX&&o.x<=maxX&&o.z>=minZ&&o.z<=maxZ});
- const nodes=[{x:start.x,z:start.z},{x:end.x,z:end.z}],angles=8;
- for(const o of directObs){for(let i=0;i<angles;i++){const a=(i/angles)*Math.PI*2,r=o.r+NAV_CLEARANCE+.45,p={x:o.x+Math.cos(a)*r,z:o.z+Math.sin(a)*r};if(walkablePoint(p.x,p.z))nodes.push(p)}}
- const n=nodes.length,edges=Array.from({length:n},()=>[]);
- const link=(i,j)=>{if(i===j)return;const a=nodes[i],b=nodes[j],d=Math.hypot(a.x-b.x,a.z-b.z);if(d<.01||!segmentClear(a,b,directObs))return;edges[i].push([j,d]);edges[j].push([i,d])};
- // Connect start/end to every visible waypoint, then connect each waypoint to its nearest visible neighbours.
- for(let i=0;i<n;i++){const candidates=[];for(let j=0;j<n;j++){if(i===j)continue;const d=Math.hypot(nodes[i].x-nodes[j].x,nodes[i].z-nodes[j].z);candidates.push({j,d})}candidates.sort((a,b)=>a.d-b.d);let connected=0;for(const q of candidates){if(i>1&&connected>=8)break;if(segmentClear(nodes[i],nodes[q.j],directObs)){link(i,q.j);connected++}}}
- const g=new Array(n).fill(Infinity),prev=new Array(n).fill(-1),open=[{i:0,f:Math.hypot(end.x-start.x,end.z-start.z)}],closed=new Set();g[0]=0;
- while(open.length){open.sort((a,b)=>a.f-b.f);const cur=open.shift(),i=cur.i;if(closed.has(i))continue;if(i===1){const path=[];let k=1;while(k!==-1){path.unshift({x:nodes[k].x,z:nodes[k].z});k=prev[k]}return path}closed.add(i);for(const [j,d] of edges[i]){if(closed.has(j))continue;const ng=g[i]+d;if(ng<g[j]){g[j]=ng;prev[j]=i;open.push({i:j,f:ng+Math.hypot(nodes[j].x-end.x,nodes[j].z-end.z)})}}}
- return segmentClear(start,end,obstacles)?[{x:start.x,z:start.z},{x:end.x,z:end.z}]:[];
+ if(!Number.isFinite(start.x+start.z+end.x+end.z))return [];
+ if(walkablePoint(end.x,end.z)===false){let best=null,bd=Infinity;for(let i=0;i<16;i++){const a=i*Math.PI/8;const p={x:end.x+Math.cos(a)*3,z:end.z+Math.sin(a)*3};if(walkablePoint(p.x,p.z)){const d=Math.hypot(p.x-start.x,p.z-start.z);if(d<bd){best=p;bd=d}}}if(best)end=best}
+ if(!walkablePoint(start.x,start.z)||!walkablePoint(end.x,end.z))return [];
+ if(segmentClear(start,end,obstacles))return [{x:start.x,z:start.z},{x:end.x,z:end.z}];
+ const vx=end.x-start.x,vz=end.z-start.z,len=Math.hypot(vx,vz)||1,nx=-vz/len,nz=vx/len;
+ const nearby=obstacles.filter(o=>{const t=THREE.MathUtils.clamp(((o.x-start.x)*vx+(o.z-start.z)*vz)/(len*len),0,1);const px=start.x+vx*t,pz=start.z+vz*t;return Math.hypot(o.x-px,o.z-pz)<o.r+NAV_CLEARANCE+7});
+ const nodes=[{x:start.x,z:start.z},{x:end.x,z:end.z}],angles=6;
+ for(const o of nearby){for(let i=0;i<angles;i++){const a=i*Math.PI*2/angles,r=o.r+NAV_CLEARANCE+.65,p={x:o.x+Math.cos(a)*r,z:o.z+Math.sin(a)*r};if(walkablePoint(p.x,p.z))nodes.push(p)}}
+ const n=nodes.length,adj=Array.from({length:n},()=>[]);
+ const localObs=(a,b)=>nearby.filter(o=>o.x>=Math.min(a.x,b.x)-o.r-1&&o.x<=Math.max(a.x,b.x)+o.r+1&&o.z>=Math.min(a.z,b.z)-o.r-1&&o.z<=Math.max(a.z,b.z)+o.r+1);
+ const add=(i,j)=>{const a=nodes[i],b=nodes[j],obs=localObs(a,b);if(segmentClear(a,b,obs)){const d=Math.hypot(a.x-b.x,a.z-b.z);adj[i].push([j,d]);adj[j].push([i,d])}};
+ // Start/end connect to visible nodes; obstacle waypoints connect only to nearby waypoints.
+ for(let j=2;j<n;j++){add(0,j);add(1,j)}
+ for(let i=2;i<n;i++){const near=[];for(let j=2;j<n;j++)if(i!==j)near.push({j,d:Math.hypot(nodes[i].x-nodes[j].x,nodes[i].z-nodes[j].z)});near.sort((a,b)=>a.d-b.d);let links=0;for(const q of near){if(links>=5)break;if(adj[i].some(e=>e[0]===q.j))continue;const before=adj[i].length;add(i,q.j);if(adj[i].length>before)links++}}
+ const cost=new Array(n).fill(Infinity),prev=new Array(n).fill(-1),open=[{i:0,f:Math.hypot(end.x-start.x,end.z-start.z)}],closed=new Set();cost[0]=0;
+ while(open.length){open.sort((a,b)=>a.f-b.f);const cur=open.shift(),i=cur.i;if(closed.has(i))continue;if(i===1){const path=[];let k=1;while(k!==-1){path.unshift({x:nodes[k].x,z:nodes[k].z});k=prev[k]}return path}closed.add(i);for(const [j,d] of adj[i]){if(closed.has(j))continue;const ng=cost[i]+d;if(ng<cost[j]){cost[j]=ng;prev[j]=i;open.push({i:j,f:ng+Math.hypot(nodes[j].x-end.x,nodes[j].z-end.z)})}}}
+ return [];
 }
 function setPath(actor,target){const path=astar(actor.pos,target);actor.path=path;actor.pathIndex=path.length>1?1:0;actor.pathGoal={x:target.x,z:target.z};actor.pathFailed=!path.length}
 function movePath(actor,speed,dt){if(!actor.path?.length)return;let p=actor.path[actor.pathIndex];if(!p)return;const dx=p.x-actor.pos.x,dz=p.z-actor.pos.z,d=Math.hypot(dx,dz);if(d<.7){actor.pathIndex++;p=actor.path[actor.pathIndex];if(!p)return;return}const step=Math.min(speed*dt,d),vx=dx/d*step,vz=dz/d*step;const beforeX=actor.pos.x,beforeZ=actor.pos.z;let moved=false;for(const scale of [1,.7,.4]){if(walkablePoint(actor.pos.x+vx*scale,actor.pos.z+vz*scale)){clearMove(actor,vx*scale,vz*scale);moved=true;break}}actor.group.rotation.y=Math.atan2(dx,dz);if(!moved||Math.hypot(actor.pos.x-beforeX,actor.pos.z-beforeZ)<.01){actor.path=[];actor.pathIndex=0;actor.think=0}}
