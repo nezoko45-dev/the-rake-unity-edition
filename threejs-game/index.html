@@ -60,22 +60,27 @@ const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeAct
 loadRake();
 // Music tracks are loaded from the repository's Assets folder. Try common audio formats
 // so the track works regardless of the extension used in the uploaded assets.
-const dayMusic=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url).href);
-const nightMusic=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url).href);
-for(const audio of [dayMusic,nightMusic]){audio.loop=true;audio.preload='auto';audio.volume=.55}
-let musicMode='';
+const dayMusic=new Audio(new URL('../Assets/Welcome to Whispering Pines.mp3',document.baseURI).href);
+const nightMusic=new Audio(new URL('../Assets/The Calm - Kazuma Jinnouchi (Soundtrack 3 - Do You Copy).mp3',document.baseURI).href);
+for(const [label,audio] of [['day',dayMusic],['night',nightMusic]]){
+ audio.loop=true;audio.preload='auto';audio.volume=.55;
+ audio.addEventListener('error',()=>{console.error(label+' music failed to load:',audio.currentSrc,audio.error);notify('Music file failed to load — see Chrome Console for details')});
+ audio.addEventListener('playing',()=>console.info(label+' music is playing:',audio.currentSrc));
+}
+let musicMode='',musicStarted=false;
 function updateMusic(isNight){
- const mode=isNight?'night':'day';if(mode===musicMode)return;musicMode=mode;
+ if(!musicStarted)return;
+ const mode=isNight?'night':'day';if(mode===musicMode)return;
  const active=isNight?nightMusic:dayMusic,other=isNight?dayMusic:nightMusic;
- other.pause();other.currentTime=0;
- active.play().catch(err=>{console.warn('Chrome could not play game music:',err);notify('Music could not play — check Chrome tab and computer volume')});
+ other.pause();other.currentTime=0;musicMode=mode;
+ active.play().catch(err=>{console.error('Chrome audio playback failed:',err);musicMode='';notify('Music playback failed — check Chrome Console and volume')});
 }
 window.__startGameAudio=()=>{
- // Start standard Chrome HTML audio directly from the user's ENTER click.
- musicMode='';
- const isNightNow=(elapsed%DAY_LENGTH)>=DAY_LENGTH*.25;
- night=isNightNow;
- updateMusic(isNightNow);
+ musicStarted=true;musicMode='';
+ night=(elapsed%DAY_LENGTH)>=DAY_LENGTH*.25;
+ const active=night?nightMusic:dayMusic,other=night?dayMusic:nightMusic;
+ other.pause();other.currentTime=0;musicMode=night?'night':'day';
+ active.play().catch(err=>{console.error('Chrome audio playback failed:',err);musicMode='';notify('Music playback failed — check Chrome Console and volume')});
 };
 const clock=new THREE.Clock();let elapsed=0,night=false,gameStarted=false;const DAY_LENGTH=600;const keys={};addEventListener('keydown',e=>{if(e.code==='KeyF'&&!e.repeat){setFlashlight(!flashlightOn);return}keys[e.code]=true});addEventListener('keyup',e=>keys[e.code]=false);
 document.getElementById('start').onclick=()=>{gameStarted=true;window.__gameStartedRequested=true;if(window.__startGameAudio)window.__startGameAudio();document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look');}};controls.addEventListener('lock',()=>document.getElementById('overlay').style.display='none');controls.addEventListener('unlock',()=>{if(!gameStarted)document.getElementById('overlay').style.display='grid';else document.getElementById('overlay').style.display='none'});renderer.domElement.addEventListener('click',()=>{if(gameStarted&&player.alive&&!controls.isLocked)controls.lock()});
