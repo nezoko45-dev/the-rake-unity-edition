@@ -11,7 +11,7 @@
 <body>
 <div id="hud"><div id="title">THE RAKE <span style="color:#e4a45b">/ NIGHT SHIFT</span></div><div id="status">DAY — SAFE(ISH)</div><div id="stats">Health: 100<br>Survivors: 4 / 4<br>Rake: retreating</div><div style="height:7px;background:#27323a;border-radius:5px;overflow:hidden;margin-top:8px"><div id="playerHealthFill" style="height:100%;width:100%;background:#64d68a"></div></div><small>Find the survivors. Stay together.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click to lock mouse<br>Survivors fight beside you and respawn after death.</div><div id="cross"></div><div id="worldBars"></div><div id="anims">GLB ANIMATIONS: loading Rake model…</div><div id="notice"></div>
-<div id="overlay"><div id="panel"><h1>DON'T GET CAUGHT AFTER DARK</h1><p>Survivors will back you up. The Rake retreats by day, then hunts everyone at night.</p><p><small>Click to enter the forest. Use headphones.</small></p><button id="start" onclick="window.__gameStartedRequested=true;document.getElementById('overlay').style.display='none';document.getElementById('notice').textContent='Starting forest…';document.getElementById('notice').style.display='block'">ENTER THE FOREST</button></div></div>
+<div id="overlay"><div id="panel"><h1>DON'T GET CAUGHT AFTER DARK</h1><p>Survivors will back you up. The Rake retreats by day, then hunts everyone at night.</p><p><small>Click to enter the forest. Use headphones.</small></p><button id="start" onclick="window.__gameStartedRequested=true;if(window.__startGameAudio)window.__startGameAudio();document.getElementById('overlay').style.display='none';document.getElementById('notice').textContent='Starting forest…';document.getElementById('notice').style.display='block'">ENTER THE FOREST</button></div></div>
 <script>
 window.addEventListener('error',function(e){
   const n=document.getElementById('notice');
@@ -78,6 +78,19 @@ function updateMusic(isNight){
  const mode=isNight?'night':'day';if(mode===musicMode)return;musicMode=mode;
  if(isNight){dayMusic.stop();nightMusic.play()}else{nightMusic.stop();dayMusic.play()}
 }
+window.__startGameAudio=()=>{
+ // Invoke play directly from the ENTER button's click handler so browsers
+ // recognize this as user-initiated audio and permit playback.
+ const isNightNow=(elapsed%DAY_LENGTH)>=DAY_LENGTH*.25;
+ night=isNightNow;
+ musicMode='';
+ updateMusic(isNightNow);
+ const active=isNightNow?nightMusic:dayMusic;
+ active.audio.play().then(()=>console.info('Game music playing:',active.audio.currentSrc)).catch(err=>{
+   console.warn('Game music playback blocked or failed:',err);
+   notify('Music blocked — tap ENTER again or check device volume');
+ });
+};
 const clock=new THREE.Clock();let elapsed=0,night=false,gameStarted=false;const DAY_LENGTH=600;const keys={};addEventListener('keydown',e=>{if(e.code==='KeyF'&&!e.repeat){setFlashlight(!flashlightOn);return}keys[e.code]=true});addEventListener('keyup',e=>keys[e.code]=false);
 document.getElementById('start').onclick=()=>{gameStarted=true;document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look');}};controls.addEventListener('lock',()=>document.getElementById('overlay').style.display='none');controls.addEventListener('unlock',()=>{if(!gameStarted)document.getElementById('overlay').style.display='grid';else document.getElementById('overlay').style.display='none'});renderer.domElement.addEventListener('click',()=>{if(gameStarted&&player.alive&&!controls.isLocked)controls.lock()});
 function makeHealthBar(){const el=document.createElement('div');el.className='worldbar';el.innerHTML='<i></i>';document.getElementById('worldBars').appendChild(el);return el}
