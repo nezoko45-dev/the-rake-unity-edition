@@ -66,17 +66,49 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r)}
 function clearMove(actor,dx,dz){const nx=actor.pos.x+dx,nz=actor.pos.z+dz;if(!blocked(nx,nz)){actor.pos.x=nx;actor.pos.z=nz}else if(!blocked(actor.pos.x+dx,actor.pos.z))actor.pos.x+=dx;else if(!blocked(actor.pos.x,actor.pos.z+dz))actor.pos.z+=dz;actor.group.position.x=actor.pos.x;actor.group.position.z=actor.pos.z}
 function nearestTarget(from,includePlayer=true){let best=null,bd=Infinity;if(includePlayer&&player.alive){best=player;bd=distance(from,player.pos)}for(const a of allies){if(a.alive){const d=distance(from,a.pos);if(d<bd){best=a;bd=d}}}return {target:best,d:bd}}
 function walkablePoint(x,z){return !blocked(x,z)}
-function setPath(actor,target){const ox=Math.floor(actor.pos.x/HEAT_CELL)*HEAT_CELL-HEAT_HALF*HEAT_CELL,oz=Math.floor(actor.pos.z/HEAT_CELL)*HEAT_CELL-HEAT_HALF*HEAT_CELL;const index=(x,z)=>z*HEAT_SIZE+x,world=(x,z)=>({x:ox+(x+.5)*HEAT_CELL,z:oz+(z+.5)*HEAT_CELL});const grid=new Uint8Array(HEAT_SIZE*HEAT_SIZE),dist=new Float32Array(HEAT_SIZE*HEAT_SIZE);dist.fill(Infinity);for(let z=0;z<HEAT_SIZE;z++)for(let x=0;x<HEAT_SIZE;x++){const p=world(x,z);if(obstacles.some(o=>Math.hypot(p.x-o.x,p.z-o.z)<o.r+NAV_CLEARANCE))grid[index(x,z)]=1}
-const toCell=(v,o)=>THREE.MathUtils.clamp(Math.floor((v-o)/HEAT_CELL),0,HEAT_SIZE-1);let sx=toCell(actor.pos.x,ox),sz=toCell(actor.pos.z,oz),tx=toCell(target.x,ox),tz=toCell(target.z,oz);const findOpen=(x,z)=>{if(!grid[index(x,z)])return {x,z};for(let r=1;r<6;r++)for(let dz=-r;dz<=r;dz++)for(let dx=-r;dx<=r;dx++){const xx=x+dx,zz=z+dz;if(xx>=0&&zz>=0&&xx<HEAT_SIZE&&zz<HEAT_SIZE&&!grid[index(xx,zz)])return {x:xx,z:zz}}return null};const start=findOpen(sx,sz),goal=findOpen(tx,tz);if(!start||!goal){actor.path=[];actor.pathFailed=true;return}sx=start.x;sz=start.z;tx=goal.x;tz=goal.z;const queue=new Int32Array(HEAT_SIZE*HEAT_SIZE);let head=0,tail=0;const gi=index(tx,tz);dist[gi]=0;queue[tail++]=gi;const dirs=[[-1,0,1],[1,0,1],[0,-1,1],[0,1,1],[-1,-1,1],[1,-1,1],[-1,1,1],[1,1,1]];while(head<tail){const cur=queue[head++],x=cur%HEAT_SIZE,z=Math.floor(cur/HEAT_SIZE);for(const [dx,dz,cost] of dirs){const nx=x+dx,nz=z+dz;if(nx<0||nz<0||nx>=HEAT_SIZE||nz>=HEAT_SIZE)continue;const ni=index(nx,nz);if(grid[ni]||Number.isFinite(dist[ni]))continue;if(dx&&dz&&(grid[index(x+dx,z)]||grid[index(x,z+dz)]))continue;dist[ni]=dist[cur]+cost;queue[tail++]=ni}}
-let x=sx,z=sz,path=[{x:actor.pos.x,z:actor.pos.z}],guard=HEAT_SIZE*HEAT_SIZE;while((x!==tx||z!==tz)&&guard-->0){let best=null,bestD=dist[index(x,z)];for(const [dx,dz] of dirs){const nx=x+dx,nz=z+dz;if(nx<0||nz<0||nx>=HEAT_SIZE||nz>=HEAT_SIZE)continue;const ni=index(nx,nz);if(!grid[ni]&&dist[ni]<bestD){bestD=dist[ni];best={x:nx,z:nz,dx,dz}}}if(!best)break;x=best.x;z=best.z;path.push(world(x,z))}actor.path=path.length>1?path:[];actor.pathIndex=1;actor.pathGoal={x:target.x,z:target.z};actor.pathFailed=!actor.path.length}
-function movePath(actor,speed,dt){if(!actor.path?.length)return;let p=actor.path[actor.pathIndex];if(!p){actor.path=[];actor.pathIndex=0;actor.think=0;return}const dx=p.x-actor.pos.x,dz=p.z-actor.pos.z,d=Math.hypot(dx,dz);if(d<.7){actor.pathIndex++;p=actor.path[actor.pathIndex];if(!p){actor.path=[];actor.pathIndex=0;actor.think=0;return}return}const step=Math.min(speed*dt,d),vx=dx/d*step,vz=dz/d*step;const beforeX=actor.pos.x,beforeZ=actor.pos.z;let moved=false;for(const scale of [1,.7,.4]){if(walkablePoint(actor.pos.x+vx*scale,actor.pos.z+vz*scale)){clearMove(actor,vx*scale,vz*scale);moved=true;break}}actor.group.rotation.y=Math.atan2(dx,dz);if(!moved||Math.hypot(actor.pos.x-beforeX,actor.pos.z-beforeZ)<.01){actor.path=[];actor.pathIndex=0;actor.think=0}}
+function setPath(actor,target){
+  // Store a destination only. Movement uses a local heatmap of obstacle clearance,
+  // not A* or a waypoint chain, so actors can continuously re-steer around trees.
+  actor.pathGoal={x:target.x,z:target.z};actor.path=[actor.pathGoal];actor.pathIndex=0;actor.pathFailed=false;
+}
+function movePath(actor,speed,dt){
+  const goal=actor.pathGoal;if(!goal)return;
+  const gx=goal.x-actor.pos.x,gz=goal.z-actor.pos.z,gd=Math.hypot(gx,gz);
+  if(gd<1.25){actor.path=[];actor.pathIndex=0;actor.think=0;return}
+  // Sample a local potential/heatmap in 16 directions. Reward progress toward
+  // the goal and clearance from obstacles; reject blocked steps and corner cutting.
+  const dirs=16,look=Math.max(1.8,Math.min(4.2,speed*.42)),step=Math.min(speed*dt,look);
+  let best=null,bestScore=-Infinity;
+  for(let i=0;i<dirs;i++){
+    const ang=i*Math.PI*2/dirs,dx=Math.sin(ang),dz=Math.cos(ang);
+    let score=(gx*dx+gz*dz)/gd*3.2;
+    let clear=Infinity,blockedAhead=false;
+    for(const o of obstacles){
+      const ox=actor.pos.x+dx*look-o.x,oz=actor.pos.z+dz*look-o.z;
+      const edge=Math.hypot(ox,oz)-o.r-NAV_CLEARANCE;
+      if(edge<clear)clear=edge;
+      if(Math.hypot(actor.pos.x+dx*step-o.x,actor.pos.z+dz*step-o.z)<o.r+.12)blockedAhead=true;
+    }
+    if(blockedAhead)continue;
+    score+=Math.min(3,Math.max(-5,clear))*.9;
+    // A small side-step bias breaks ties when the actor is facing an obstacle.
+    score-=Math.abs(ang-Math.atan2(gx,gz))*.0001;
+    if(score>bestScore){bestScore=score;best={dx,dz}}
+  }
+  if(!best){actor.path=[];actor.pathIndex=0;actor.think=0;actor.pathFailed=true;return}
+  const beforeX=actor.pos.x,beforeZ=actor.pos.z;
+  clearMove(actor,best.dx*step,best.dz*step);
+  actor.group.rotation.y=Math.atan2(best.dx,best.dz);
+  if(Math.hypot(actor.pos.x-beforeX,actor.pos.z-beforeZ)<.01){actor.path=[];actor.pathIndex=0;actor.think=0;actor.pathFailed=true}
+  else actor.pathFailed=false;
+}
 function damage(target,n){if(!target.alive)return;if(target.isRake&&target.parryTimer>0){if(!target.parryNotice){notify('The Rake deflected the hit!');target.parryNotice=true}return;}target.hp-=n;if(target.hp<=0){target.hp=0;target.alive=false;if(target.kind==='ally'){target.respawn=5;target.group.visible=false;notify('A survivor is down — backup in 5 seconds')}else if(target.kind==='player'){target.respawn=4;controls.unlock();notify('You were killed — respawning in 4 seconds...')}else{target.respawn=12;target.group.visible=false;notify('The Rake is down... for now.')}}}
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,0,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;notify('You have respawned!');}
 function notify(t){const n=document.getElementById('notice');n.textContent=t;n.style.display='block';clearTimeout(notify.timer);notify.timer=setTimeout(()=>n.style.display='none',2300)}
 function respawn(a){a.alive=true;a.hp=a.kind==='rake'?15000:65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||new THREE.Vector3(-43,0,-43));a.group.position.copy(a.pos);a.path=[];a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
-function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(rake.alive&&d<24){if(a.think<=0||!a.path?.length||a.pathFailed){setPath(a,rake.pos);a.think=.55}if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{movePath(a,rake.parryTimer>0?3.2:4.2,dt);play(a,'walk')}}else{const spread=allies.indexOf(a),angle=elapsed*.32+spread*Math.PI*.5,ring=6+(spread%2)*2,tx=player.pos.x+Math.cos(angle)*ring,tz=player.pos.z+Math.sin(angle)*ring;const goalDistance=distance(a.pos,{x:tx,z:tz});if(a.think<=0||!a.path?.length||a.pathFailed||goalDistance>10){let chosen=null;for(let tries=0;tries<12;tries++){const ang=angle+(rand()-.5)*1.8,rad=5+rand()*5,x=player.pos.x+Math.cos(ang)*rad,z=player.pos.z+Math.sin(ang)*rad;if(!blocked(x,z)){chosen={x,z};break}}setPath(a,chosen||{x:tx,z:tz});a.think=.7}movePath(a,3.5,dt);if(a.path?.length)play(a,'walk');else{const nudge=walkablePoint(a.pos.x+Math.cos(angle)*dt*2,a.pos.z+Math.sin(angle)*dt*2);if(nudge)clearMove(a,Math.cos(angle)*dt*2,Math.sin(angle)*dt*2);a.path=[];a.think=0;play(a,'walk')}}}
+function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(rake.alive&&d<24){if(a.think<=0||!a.path?.length||a.pathFailed){setPath(a,rake.pos);a.think=.55}if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{movePath(a,rake.parryTimer>0?3.2:4.2,dt);play(a,'walk')}}else{const spread=allies.indexOf(a),angle=elapsed*.32+spread*Math.PI*.5,ring=6+(spread%2)*2,tx=player.pos.x+Math.cos(angle)*ring,tz=player.pos.z+Math.sin(angle)*ring;const goalDistance=distance(a.pos,{x:tx,z:tz});if(a.think<=0||!a.path?.length||a.pathFailed||goalDistance>10){let chosen=null;for(let tries=0;tries<12;tries++){const ang=angle+(rand()-.5)*1.8,rad=5+rand()*5,x=player.pos.x+Math.cos(ang)*rad,z=player.pos.z+Math.sin(ang)*rad;if(!blocked(x,z)){chosen={x,z};break}}setPath(a,chosen||{x:tx,z:tz});a.think=.7}movePath(a,3.5,dt);if(!a.path?.length||a.pathFailed){a.think=0;setPath(a,{x:player.pos.x+Math.cos(angle)*6,z:player.pos.z+Math.sin(angle)*6})}play(a,'walk')}}
 function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.targetHits=0;/* Daytime behavior: always retreat to the original spawn near the camp. */const home={x:-43,z:-43};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setPath(rake,home);rake.think=1.0}if(distance(rake.pos,home)>2){movePath(rake,7,dt);play(rake,'walk')}else{rake.path=[];play(rake,'idle')}return}
 const validTargets=[];if(player.alive){const d=distance(rake.pos,player.pos);if(d<=45)validTargets.push({target:player,d})}for(const a of allies){if(a.alive){const d=distance(rake.pos,a.pos);if(d<=45)validTargets.push({target:a,d})}}validTargets.sort((a,b)=>a.d-b.d);let found=validTargets[0]||{target:null,d:Infinity};
 // If several survivors are within the 45-stud hunting radius, switch after two successful hits on the current target.
