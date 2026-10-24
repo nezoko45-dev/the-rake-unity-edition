@@ -60,8 +60,8 @@ const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeAct
 loadRake();
 // Music tracks are loaded from the repository's Assets folder. Try common audio formats
 // so the track works regardless of the extension used in the uploaded assets.
-const dayMusic=new Audio(new URL('../Assets/Welcome to Whispering Pines.mp3',document.baseURI).href);
-const nightMusic=new Audio(new URL('../Assets/The Calm - Kazuma Jinnouchi (Soundtrack 3 - Do You Copy).mp3',document.baseURI).href);
+const dayMusic=new Audio('https://raw.githubusercontent.com/nezoko45-dev/the-rake-unity-edition/main/Assets/Welcome%20to%20Whispering%20Pines.mp3');
+const nightMusic=new Audio('https://raw.githubusercontent.com/nezoko45-dev/the-rake-unity-edition/main/Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3');
 for(const [label,audio] of [['day',dayMusic],['night',nightMusic]]){
  audio.loop=true;audio.preload='auto';audio.volume=.55;
  audio.addEventListener('error',()=>{console.error(label+' music failed to load:',audio.currentSrc,audio.error);notify('Music file failed to load — see Chrome Console for details')});
