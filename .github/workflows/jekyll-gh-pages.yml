@@ -28,6 +28,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate game JavaScript syntax
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path('threejs-game/index.html').read_text()
+          scripts = re.findall(r'<script type="module">([\\s\\S]*?)</script>', html)
+          if len(scripts) != 1:
+              raise SystemExit(f'Expected one game module, found {len(scripts)}')
+          Path('/tmp/game.mjs').write_text(scripts[0])
+          PY
+          node --check /tmp/game.mjs
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Build with Jekyll
