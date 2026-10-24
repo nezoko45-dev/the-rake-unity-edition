@@ -59,9 +59,6 @@ loadRake();
 const clock=new THREE.Clock();let elapsed=0,night=false,gameStarted=false;const DAY_LENGTH=600;const keys={};addEventListener('keydown',e=>keys[e.code]=true);addEventListener('keyup',e=>keys[e.code]=false);
 document.getElementById('start').onclick=()=>{gameStarted=true;document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look');}};controls.addEventListener('lock',()=>document.getElementById('overlay').style.display='none');controls.addEventListener('unlock',()=>{if(!gameStarted)document.getElementById('overlay').style.display='grid';else document.getElementById('overlay').style.display='none'});renderer.domElement.addEventListener('click',()=>{if(gameStarted&&player.alive&&!controls.isLocked)controls.lock()});
 function distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
-function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r)}
-function clearMove(actor,dx,dz){const nx=actor.pos.x+dx,nz=actor.pos.z+dz;if(!blocked(nx,nz)){actor.pos.x=nx;actor.pos.z=nz}else if(!blocked(actor.pos.x+dx,actor.pos.z))actor.pos.x+=dx;else if(!blocked(actor.pos.x,actor.pos.z+dz))actor.pos.z+=dz;actor.group.position.x=actor.pos.x;actor.group.position.z=actor.pos.z}
-function nearestTarget(from,includePlayer=true){let best=null,bd=Infinity;if(includePlayer&&player.alive){best=player;bd=distance(from,player.pos)}for(const a of allies){if(a.alive){const d=distance(from,a.pos);if(d<bd){best=a;bd=d}}}return {target:best,d:bd}}
 // Local navigation heatmap: each grid cell is walkable or blocked by tree clearance.
 // A breadth-first distance field from the target gives actors a cheap downhill route; no A* graph.
 const NAV_CLEARANCE=.55,HEAT_CELL=2.5,HEAT_SIZE=41,HEAT_HALF=Math.floor(HEAT_SIZE/2);
