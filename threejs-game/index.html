@@ -121,9 +121,67 @@ const rakeGroundRay=new THREE.Raycaster();const rakeGroundOrigin=new THREE.Vecto
 function floatRakeAboveGround(actor,dt){if(!actor?.isRake||!actor.group)return;const x=actor.pos.x,z=actor.pos.z;rakeGroundOrigin.set(x,120,z);rakeGroundRay.set(rakeGroundOrigin,rakeGroundDown);rakeGroundRay.far=240;const hits=rakeGroundRay.intersectObject(ground,false);if(!hits.length)return;const targetY=hits[0].point.y+(actor.groundOffset??.05);const currentY=Number.isFinite(actor.pos.y)?actor.pos.y:actor.group.position.y;const adjustedY=THREE.MathUtils.damp(currentY,targetY,12,dt||.016);actor.pos.y=adjustedY;actor.group.position.y=adjustedY}
 function hasLineOfSight(from,to){const dx=to.pos.x-from.pos.x,dz=to.pos.z-from.pos.z,len=Math.hypot(dx,dz);if(len<.01)return true;for(const o of obstacles){const t=Math.max(0,Math.min(1,((o.x-from.pos.x)*dx+(o.z-from.pos.z)*dz)/(len*len)));const px=from.pos.x+dx*t,pz=from.pos.z+dz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+.25)return false}return true}
 function setPath(actor,target){
-  // Store a destination only. Movement uses a local heatmap of obstacle clearance,
-  // not A* or a waypoint chain, so actors can continuously re-steer around trees.
+  // Allies retain lightweight local steering; the Rake uses the global A* route below.
   actor.pathGoal={x:target.x,z:target.z};actor.path=[actor.pathGoal];actor.pathIndex=0;actor.pathFailed=false;
+}
+function rakeCellKey(x,z){return x+','+z}
+function rakeCellBlocked(cx,cz){
+  const x=cx*HEAT_CELL,z=cz*HEAT_CELL;
+  return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+NAV_CLEARANCE);
+}
+function rakeFindPath(start,goal){
+  const sx=Math.round(start.x/HEAT_CELL),sz=Math.round(start.z/HEAT_CELL);
+  const gx=Math.round(goal.x/HEAT_CELL),gz=Math.round(goal.z/HEAT_CELL);
+  const margin=24,minX=Math.min(sx,gx)-margin,maxX=Math.max(sx,gx)+margin;
+  const minZ=Math.min(sz,gz)-margin,maxZ=Math.max(sz,gz)+margin;
+  const key=rakeCellKey,open=[],gScore=new Map(),came=new Map(),closed=new Set();
+  const heuristic=(x,z)=>Math.hypot(gx-x,gz-z);
+  const push=(node)=>{let i=open.length;open.push(node);while(i>0){const p=(i-1)>>1;if(open[p].f<=node.f)break;open[i]=open[p];i=p}open[i]=node};
+  const pop=()=>{const root=open[0],last=open.pop();if(open.length){let i=0;while(true){let c=i*2+1;if(c>=open.length)break;if(c+1<open.length&&open[c+1].f<open[c].f)c++;if(open[c].f>=last.f)break;open[i]=open[c];i=c}open[i]=last}return root};
+  const startKey=key(sx,sz);gScore.set(startKey,0);push({x:sx,z:sz,k:startKey,g:0,f:heuristic(sx,sz)});
+  const dirs=[[-1,0,1],[1,0,1],[0,-1,1],[0,1,1],[-1,-1,1.4142],[-1,1,1.4142],[1,-1,1.4142],[1,1,1.4142]];
+  let reached=null,iterations=0;
+  while(open.length&&iterations++<60000){
+    const cur=pop();if(closed.has(cur.k))continue;closed.add(cur.k);
+    if(cur.x===gx&&cur.z===gz){reached=cur.k;break}
+    for(const [dx,dz,cost] of dirs){
+      const nx=cur.x+dx,nz=cur.z+dz,nk=key(nx,nz);
+      if(nx<minX||nx>maxX||nz<minZ||nz>maxZ||closed.has(nk)||rakeCellBlocked(nx,nz))continue;
+      if(dx&&dz&&(rakeCellBlocked(cur.x+dx,cur.z)||rakeCellBlocked(cur.x,cur.z+dz)))continue;
+      const ng=cur.g+cost;
+      if(ng<(gScore.get(nk)??Infinity)){gScore.set(nk,ng);came.set(nk,cur.k);push({x:nx,z:nz,k:nk,g:ng,f:ng+heuristic(nx,nz)})}
+    }
+  }
+  if(!reached){
+    // If the exact goal cell is obstructed, route to the nearest walkable cell around it.
+    let best=null,bd=Infinity;
+    for(let radius=1;radius<=8;radius++)for(let dx=-radius;dx<=radius;dx++)for(let dz=-radius;dz<=radius;dz++){
+      if(Math.max(Math.abs(dx),Math.abs(dz))!==radius)continue;
+      const x=gx+dx,z=gz+dz,k=key(x,z),g=gScore.get(k);
+      if(g!==undefined&&g+heuristic(x,z)<bd){best=k;bd=g+heuristic(x,z)}
+    }
+    reached=best;
+  }
+  if(!reached)return null;
+  const cells=[];let k=reached;
+  while(k&&k!==startKey){const [x,z]=k.split(',').map(Number);cells.push({x:x*HEAT_CELL,z:z*HEAT_CELL});k=came.get(k)}
+  cells.reverse();return cells;
+}
+function setRakePath(target){
+  const route=rakeFindPath(rake.pos,target);
+  rake.path=route||[];rake.pathIndex=0;rake.pathGoal={x:target.x,z:target.z};
+  rake.pathFailed=!route||!route.length;rake.pathRetry=0;
+}
+function moveRakePath(speed,dt){
+  if(!rake.path?.length||rake.pathIndex>=rake.path.length)return;
+  let node=rake.path[rake.pathIndex];
+  while(node&&distance(rake.pos,node)<.65){rake.pathIndex++;node=rake.path[rake.pathIndex]}
+  if(!node)return;
+  const dx=node.x-rake.pos.x,dz=node.z-rake.pos.z,len=Math.hypot(dx,dz);
+  if(len<.001)return;
+  const step=Math.min(speed*dt,len),nx=rake.pos.x+dx/len*step,nz=rake.pos.z+dz/len*step;
+  if(!blocked(nx,nz)){rake.pos.x=nx;rake.pos.z=nz;rake.group.position.x=nx;rake.group.position.z=nz;rake.group.rotation.y=Math.atan2(dx,dz)}
+  else{rake.pathFailed=true;rake.path=[];rake.pathIndex=0}
 }
 function movePath(actor,speed,dt){
   const goal=actor.pathGoal;if(!goal)return;
@@ -163,49 +221,21 @@ function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(player.hp<=35&&player.alive){if(distance(a.pos,player.pos)>2.5){if(a.think<=0||!a.path?.length){setPath(a,player.pos);a.think=.5}movePath(a,3.5,dt);play(a,'walk')}else play(a,'idle');return}if(rake.alive&&d<24){if(a.think<=0||!a.path?.length||a.pathFailed){setPath(a,rake.pos);a.think=.55}if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{movePath(a,4.2,dt);play(a,'walk')}}else{if(a.think<=0||!a.pathGoal||!a.path?.length||a.pathFailed){let found=false;for(let tries=0;tries<30;tries++){const angle=rand()*Math.PI*2,rad=6+rand()*12,x=player.pos.x+Math.cos(angle)*rad,z=player.pos.z+Math.sin(angle)*rad;if(walkablePoint(x,z)&&distance(a.pos,{x,z})>3){setPath(a,{x,z});found=true;break}}if(!found){const angle=rand()*Math.PI*2;setPath(a,{x:a.pos.x+Math.cos(angle)*5,z:a.pos.z+Math.sin(angle)*5})}a.think=2+rand()*2}if(a.pathGoal&&distance(a.pos,a.pathGoal)>1.3){movePath(a,2.1,dt);play(a,'walk')}else{a.path=[];a.pathGoal=null;play(a,'idle')}}}
-function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.targetHits=0;rake.lastSeenCell=null;rake.searchTimer=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setPath(rake,home);rake.think=1.0}if(distance(rake.pos,home)>2){movePath(rake,4,dt);play(rake,'walk')}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
-/* Persistent target lock: keep chasing the same survivor while they move,
-   and search their last known position briefly when trees break line of sight.
-   Keep targets individually (not grouped by grid cell), so random spawns cannot
-   overwrite another survivor that happens to occupy the same heatmap cell. */
-const validTargets=[];
-if(player.alive)validTargets.push(player);
-for(const a of allies)if(a.alive)validTargets.push(a);
-const visibleTargets=validTargets.filter(t=>hasLineOfSight(rake,t));
-let locked=rake.target&&rake.target.alive? rake.target:null;
-let found=null;
-if(locked){
-  const visible=hasLineOfSight(rake,locked);
-  if(visible){
-    rake.lastSeenCell={x:Math.round(locked.pos.x/HEAT_CELL)*HEAT_CELL,z:Math.round(locked.pos.z/HEAT_CELL)*HEAT_CELL};
-    rake.targetLostTimer=0;
-    found={target:locked,cell:{x:locked.pos.x,z:locked.pos.z},d:distance(rake.pos,locked.pos),cellD:distance(rake.pos,locked.pos),visible:true};
-  }else{
-    rake.targetLostTimer=(rake.targetLostTimer||0)+dt;
-    if(rake.lastSeenCell&&rake.targetLostTimer<8){
-      found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true};
-    }else{rake.target=null;locked=null;rake.targetLostTimer=0}
-  }
-}
-if(!locked){
-  const candidates=(visibleTargets.length?visibleTargets:validTargets).slice().sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
-  const next=candidates[0]||null;
-  if(next){
-    rake.target=next;rake.targetHits=0;rake.targetLostTimer=0;
-    rake.lastSeenCell={x:Math.round(next.pos.x/HEAT_CELL)*HEAT_CELL,z:Math.round(next.pos.z/HEAT_CELL)*HEAT_CELL};
-    found={target:next,cell:{x:next.pos.x,z:next.pos.z},d:distance(rake.pos,next.pos),cellD:distance(rake.pos,next.pos),visible:hasLineOfSight(rake,next)};
-  }else if(rake.lastSeenCell){
-    found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true};
-  }
-}
+function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.targetHits=0;rake.lastSeenCell=null;rake.searchTimer=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(4,dt);play(rake,'walk')}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+/* Track occupied cells of visible survivors. If everyone is out of sight, play the dedicated search animation while searching the last seen cell for up to 3 seconds, then resume scanning occupied cells. */
+const occupiedCells=new Map();
+const addOccupiedCell=target=>{const cx=Math.round(target.pos.x/HEAT_CELL),cz=Math.round(target.pos.z/HEAT_CELL),key=cx+','+cz,cell={x:cx*HEAT_CELL,z:cz*HEAT_CELL};if(!occupiedCells.has(key))occupiedCells.set(key,{target,cell,d:distance(rake.pos,target.pos),cellD:distance(rake.pos,cell),visible:hasLineOfSight(rake,target)});else{const entry=occupiedCells.get(key);if(distance(rake.pos,target.pos)<entry.d){entry.target=target;entry.d=distance(rake.pos,target.pos);entry.visible=hasLineOfSight(rake,target)}}};
+if(player.alive)addOccupiedCell(player);for(const a of allies){if(a.alive)addOccupiedCell(a)}
+const validTargets=[...occupiedCells.values()].sort((a,b)=>a.cellD-b.cellD);
+const visibleTargets=validTargets.filter(v=>v.visible);let found=visibleTargets[0]||null;
+if(found){rake.lastSeenCell={x:found.cell.x,z:found.cell.z};rake.searchTimer=3;rake.searching=false}
+else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){rake.searchTimer=Math.max(0,rake.searchTimer-dt);rake.searching=true;found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true}}
+else{rake.searching=false;found=validTargets[0]||null}
 if(found){
-  rake.searching=!!found.searching;
+  if(found.target&&rake.target!==found.target){rake.target=found.target;rake.targetHits=0;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
   const goal=found.target?found.target.pos:found.cell;
-  if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){
-    setPath(rake,goal);rake.think=.12;
-  }else if(found.target&&rake.pathGoal&&distance(rake.pathGoal,goal)>1.5){
-    setPath(rake,goal);rake.think=.12;
-  }
+  if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){setRakePath(goal);rake.think=.8}
+  else if(found.target&&distance(rake.pathGoal,goal)>5){setRakePath(goal);rake.think=.8}
   if(found.target){
     const playerDistance=distance(player.pos,rake.pos);
     const toRake=new THREE.Vector3(rake.pos.x-player.pos.x,0,rake.pos.z-player.pos.z);
@@ -218,16 +248,14 @@ if(found){
       if(rake.attack<=0){damage(found.target,found.target.kind==='player'?30:24);rake.targetHits=(rake.targetHits||0)+1;rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack')}
       else if(rake.attackAnimTimer>0)play(rake,'attack');else play(rake,'idle');
     }else{
-      rake.attackAnimTimer=0;const chaseSpeed=found.cellD>20?4:12;
-      movePath(rake,chaseSpeed,dt);if(!play(rake,found.cellD>20?'walk':'run'))play(rake,'walk');
+      rake.attackAnimTimer=0;moveRakePath(found.cellD>20?12:7,dt);if(!play(rake,found.cellD>20?'run':'walk'))play(rake,'walk');
     }
   }else{
-    movePath(rake,4,dt);if(found.searching){if(!play(rake,'search'))play(rake,'idle')}else play(rake,'walk');
+    moveRakePath(4,dt);if(found.searching){if(!play(rake,'search'))play(rake,'idle')}else play(rake,'walk');rake.target=null;
   }
 }else{
   rake.target=null;rake.targetHits=0;rake.pathGoal=null;rake.path=[];rake.searching=false;play(rake,'idle');
-}
-floatRakeAboveGround(rake,dt)}
+}floatRakeAboveGround(rake,dt)}
 function updateDayNight(){const t=elapsed%DAY_LENGTH;const isNight=t>=DAY_LENGTH*.25;if(isNight!==night){night=isNight;notify(night?'NIGHT FALLS — THE RAKE IS HUNTING':'DAYBREAK — THE RAKE IS RETREATING');}const k=night?1:0;scene.background.lerpColors(new THREE.Color(0x91a9b3),new THREE.Color(0x000000),k);scene.fog.color.copy(scene.background);scene.fog.near=night?2:48;scene.fog.far=night?24:150;sun.intensity=night?0:2.2;ambientLight.intensity=night?0.015:2.6;ambientLight.color.set(night?0x020309:0xd8e7f0);ambientLight.groundColor.set(night?0x000000:0x3d4932);fire.intensity=night?2:5;flashlight.intensity=flashlightOn?95:0}
 const hud=document.getElementById('stats');function tick(){requestAnimationFrame(tick);const dt=Math.min(clock.getDelta(),.05);if(window.__gameStartedRequested&&!gameStarted){gameStarted=true;document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look')}}if(gameStarted){elapsed+=dt;updateDayNight();updateMusic(night);updateForestChunks();player.attack=Math.max(0,player.attack-dt);if(playerAttackHeld&&player.attack<=0)strikeRake();if(!player.alive){player.respawn-=dt;if(player.respawn<=0)respawnPlayer()}const move=new THREE.Vector3();if(keys.KeyW)move.z-=1;if(keys.KeyS)move.z+=1;if(keys.KeyA)move.x-=1;if(keys.KeyD)move.x+=1;if(move.lengthSq()){move.normalize();const speed=keys.ShiftLeft||keys.ShiftRight?9:5.5;const forward=new THREE.Vector3();camera.getWorldDirection(forward);forward.y=0;forward.normalize();const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();const delta=forward.multiplyScalar(-move.z).add(right.multiplyScalar(move.x)).multiplyScalar(speed*dt);const p=controls.getObject().position;const x=p.x+delta.x,z=p.z+delta.z;if(!blocked(x,z)){p.x=x;p.z=z}}player.pos=controls.getObject().position;updateRake(dt);allies.forEach(a=>updateAlly(a,dt));for(const m of mixers)m.update(dt);updateRakeHeadTracking();floatRakeAboveGround(rake,dt);hud.innerHTML=('Health: '+player.hp)+(player.alive?'':' (RESPAWNING)')+'<br>Survivors: '+allies.filter(a=>a.alive).length+' / '+allies.length+'<br>Rake: '+(!rake.alive?'down (respawning)':night?(distance(rake.pos,player.pos)<=45?'hunting nearby':'searching — 7 speed'):'retreating — 7 speed')+'<br>Time: '+(night?'NIGHT':'DAY');document.getElementById('playerHealthFill').style.width=Math.max(0,player.hp)+'%';document.getElementById('playerHealthFill').style.background=player.hp<=35?'#e34c4c':'#64d68a';updateHealthBar(player);allies.forEach(updateHealthBar);if(player.hp<=0)controls.unlock()}renderer.render(scene,camera)}tick();
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
