@@ -172,6 +172,7 @@ function setRakePath(target){
   rake.path=route||[];rake.pathIndex=0;rake.pathGoal={x:target.x,z:target.z};
   rake.pathFailed=!route||!route.length;rake.pathRetry=0;
 }
+const rakeTurnHelper=new THREE.Object3D();
 function moveRakePath(speed,dt){
   if(!rake.path?.length||rake.pathIndex>=rake.path.length)return;
   let node=rake.path[rake.pathIndex];
@@ -180,8 +181,12 @@ function moveRakePath(speed,dt){
   const dx=node.x-rake.pos.x,dz=node.z-rake.pos.z,len=Math.hypot(dx,dz);
   if(len<.001)return;
   const step=Math.min(speed*dt,len),nx=rake.pos.x+dx/len*step,nz=rake.pos.z+dz/len*step;
-  if(!blocked(nx,nz)){rake.pos.x=nx;rake.pos.z=nz;rake.group.position.x=nx;rake.group.position.z=nz;rake.group.rotation.y=Math.atan2(dx,dz)}
-  else{rake.pathFailed=true;rake.path=[];rake.pathIndex=0}
+  if(!blocked(nx,nz)){
+    rake.pos.x=nx;rake.pos.z=nz;rake.group.position.x=nx;rake.group.position.z=nz;
+    rakeTurnHelper.position.set(0,0,0);
+    rakeTurnHelper.lookAt(dx,0,dz);
+    rake.group.quaternion.rotateTowards(rakeTurnHelper.quaternion,3.2*dt);
+  }else{rake.pathFailed=true;rake.path=[];rake.pathIndex=0}
 }
 function movePath(actor,speed,dt){
   const goal=actor.pathGoal;if(!goal)return;
