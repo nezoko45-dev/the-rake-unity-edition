@@ -207,10 +207,23 @@ const occupiedCells=new Map();
 const addOccupiedCell=target=>{const cx=Math.round(target.pos.x/HEAT_CELL),cz=Math.round(target.pos.z/HEAT_CELL),key=cx+','+cz,cell={x:cx*HEAT_CELL,z:cz*HEAT_CELL};if(!occupiedCells.has(key))occupiedCells.set(key,{target,cell,d:distance(rake.pos,target.pos),cellD:distance(rake.pos,cell),visible:hasLineOfSight(rake,target)});else{const entry=occupiedCells.get(key);if(distance(rake.pos,target.pos)<entry.d){entry.target=target;entry.d=distance(rake.pos,target.pos);entry.visible=hasLineOfSight(rake,target)}}};
 if(player.alive)addOccupiedCell(player);for(const a of allies){if(a.alive)addOccupiedCell(a)}
 const validTargets=[...occupiedCells.values()].sort((a,b)=>a.cellD-b.cellD);
-const visibleTargets=validTargets.filter(v=>v.visible&&v.d<=45);let found=visibleTargets.find(v=>v.target!==rake.ignoreTarget)||visibleTargets[0]||null;
+// Once a target has taken two hits, exclude it completely until the Rake has
+// successfully switched to someone else. Never fall back to the ignored target.
+const eligibleTargets=validTargets.filter(v=>v.target!==rake.ignoreTarget);
+const visibleTargets=eligibleTargets.filter(v=>v.visible&&v.d<=45);
+let found=visibleTargets[0]||null;
 if(found){rake.lastSeenCell={x:found.cell.x,z:found.cell.z};rake.searchTimer=3;rake.searching=false}
-else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){rake.searchTimer=Math.max(0,rake.searchTimer-dt);rake.searching=true;found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true}}
-else if(validTargets.length){if(!rake.patrolCell||!validTargets.some(v=>v.target===rake.patrolCell.target)){const choices=validTargets.filter(v=>v.target!==rake.ignoreTarget);const pool=choices.length?choices:validTargets;rake.patrolCell=pool[Math.floor(Math.random()*pool.length)]}const occupied=rake.patrolCell;rake.searching=true;found={target:null,cell:{x:occupied.cell.x,z:occupied.cell.z},d:Infinity,cellD:occupied.cellD,visible:false,searching:true}}else{rake.searching=false;found=null}
+else if(eligibleTargets.length){
+  rake.lastSeenCell=null;rake.searchTimer=0;
+  if(!rake.patrolCell||!eligibleTargets.some(v=>v.target===rake.patrolCell.target)){
+    rake.patrolCell=eligibleTargets[Math.floor(Math.random()*eligibleTargets.length)];
+  }
+  const occupied=rake.patrolCell;rake.searching=true;
+  found={target:null,cell:{x:occupied.cell.x,z:occupied.cell.z},d:Infinity,cellD:occupied.cellD,visible:false,searching:true};
+}else{
+  // No alternative target is available; wait rather than reacquiring the ignored one.
+  rake.lastSeenCell=null;rake.searchTimer=0;rake.patrolCell=null;rake.searching=false;found=null;
+}
 if(found){
   if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.targetHits=0;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
