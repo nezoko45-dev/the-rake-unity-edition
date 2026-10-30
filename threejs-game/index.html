@@ -41,7 +41,7 @@ const sun=new THREE.DirectionalLight(0xffe0ad,2.2);sun.position.set(-35,60,20);s
 const mat=(c,r=.95)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;ground.position.y=-.035;scene.add(ground);
 const obstacles=[],trees=[],treeMeshes=[];let seed=991;
-let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;\nlet rakeKills=0,rakeSpeed=7;\nfunction recordRakeKill(){rakeKills++;rakeSpeed=1+Math.floor(Math.random()*19);notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s')+' — speed now '+rakeSpeed);console.info('Rake kill count:',rakeKills,'new speed:',rakeSpeed)}\nfunction rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
+let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;\nlet rakeKills=0,rakeSpeed=7;\nfunction recordRakeKill(){rakeKills++;rakeSpeed=1+Math.floor(Math.random()*19);if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s')+' — speed now '+rakeSpeed);console.info('Rake kill count:',rakeKills,'new speed:',rakeSpeed)}\nfunction rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
 const navFloorGeometry=new THREE.PlaneGeometry(FOREST_CHUNK*5,FOREST_CHUNK*5);
 async function initializeRecast(){try{await initRecast();recastReady=true;console.info('Recast Navigation initialized');queueForestNavMeshBuild()}catch(err){console.error('Recast initialization failed:',err);notify('Navigation system failed to initialize. Refresh the game.')}}
 function queueForestNavMeshBuild(){if(!recastReady||navBuildQueued)return;navBuildQueued=true;const version=++navBuildVersion;setTimeout(()=>{navBuildQueued=false;buildForestNavMesh(version)},180)}
@@ -150,7 +150,7 @@ function setRakePath(target){
   rake.pathFailed=!route||!route.length;rake.pathRetry=0;
 }
 const rakeTurnHelper=new THREE.Object3D();
-function updateRakeMovementAnimation(){\n  const movingSpeed=rake.actualMoveSpeed||0;\n  if(movingSpeed<.15){play(rake,'idle');return}\n  play(rake,movingSpeed>=9?'run':'walk');\n}
+function updateRakeMovementAnimation(){const movingSpeed=rake.actualMoveSpeed||0;if(movingSpeed<.15){play(rake,'idle');return}play(rake,(rake.runAnimUntil||0)>elapsed?'run':'walk')}
 function moveRakePath(speed,dt){
   rake.actualMoveSpeed=0;
   if(!rake.path?.length||rake.pathIndex>=rake.path.length)return;
@@ -192,10 +192,10 @@ const occupiedCells=new Map();
 const addOccupiedCell=target=>{const cx=Math.round(target.pos.x/HEAT_CELL),cz=Math.round(target.pos.z/HEAT_CELL),key=cx+','+cz,cell={x:cx*HEAT_CELL,z:cz*HEAT_CELL};if(!occupiedCells.has(key))occupiedCells.set(key,{target,cell,d:distance(rake.pos,target.pos),cellD:distance(rake.pos,cell),visible:hasLineOfSight(rake,target)});else{const entry=occupiedCells.get(key);if(distance(rake.pos,target.pos)<entry.d){entry.target=target;entry.d=distance(rake.pos,target.pos);entry.visible=hasLineOfSight(rake,target)}}};
 if(player.alive)addOccupiedCell(player);for(const a of allies){if(a.alive)addOccupiedCell(a)}
 const validTargets=[...occupiedCells.values()].sort((a,b)=>a.cellD-b.cellD);
-const visibleTargets=validTargets.filter(v=>v.visible);let found=visibleTargets[0]||null;
+const visibleTargets=validTargets.filter(v=>v.visible&&v.d<=45);let found=visibleTargets.find(v=>v.target!==rake.ignoreTarget)||visibleTargets[0]||null;
 if(found){rake.lastSeenCell={x:found.cell.x,z:found.cell.z};rake.searchTimer=3;rake.searching=false}
 else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){rake.searchTimer=Math.max(0,rake.searchTimer-dt);rake.searching=true;found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true}}
-else{rake.searching=false;found=validTargets[0]||null}
+else{rake.searching=false;found=null}
 if(found){
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.targetHits=0;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
   const goal=found.target?found.target.pos:found.cell;
@@ -210,7 +210,7 @@ if(found){
     if(playerFacingRake&&rake.parryCooldown<=0&&parryRoll){rake.parryTimer=1.15;rake.parryCooldown=3.5+Math.random()*2.5;rake.attack=1.15;rake.parryNotice=false;play(rake,'parry')}
     if(rake.parryTimer>0){play(rake,'parry');return}
     if(found.d<2.5){
-      if(rake.attack<=0){rakeDamageTarget(found.target,found.target.kind==='player'?30:24);rake.targetHits=(rake.targetHits||0)+1;rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack')}
+      if(rake.attack<=0){rakeDamageTarget(found.target,found.target.kind==='player'?30:24);rake.targetHits=(rake.targetHits||0)+1;rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack');if(rake.targetHits>=2){rake.ignoreTarget=found.target;rake.target=null;rake.targetHits=0;rake.path=[];rake.pathGoal=null;rake.pathFailed=false;rake.think=0;notify('The Rake is moving on to another target!')}}
       else if(rake.attackAnimTimer>0)play(rake,'attack');else play(rake,'idle');
     }else{
       rake.attackAnimTimer=0;moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation();
