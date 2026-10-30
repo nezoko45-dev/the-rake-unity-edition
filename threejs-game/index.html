@@ -227,7 +227,16 @@ if(found){
     if(rake.parryTimer>0){play(rake,'parry');return}
     if(found.d<2.5){
       if(rake.attack<=0){rakeDamageTarget(found.target,found.target.kind==='player'?30:24);rake.targetHits=(rake.targetHits||0)+1;rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack');if(rake.targetHits>=2){rake.ignoreTarget=found.target;rake.target=null;rake.targetHits=0;rake.path=[];rake.pathGoal=null;rake.pathFailed=false;rake.think=0;notify('The Rake is moving on to another target!')}}
-      else if(rake.attackAnimTimer>0)play(rake,'attack');else play(rake,'idle');
+      else{
+        // Keep pressure on a moving survivor during the attack cooldown.
+        // Only hold position when already close enough to complete the attack.
+        if(found.d>1.6){
+          moveRakeToward(goal,Math.max(1.2,rakeSpeed*.45),dt);
+          updateRakeMovementAnimation();
+          if(rake.attackAnimTimer>0)play(rake,'attack');
+        }else if(rake.attackAnimTimer>0)play(rake,'attack');
+        else play(rake,'idle');
+      }
     }else{
       rake.attackAnimTimer=0;moveRakePath(rakeSpeed,dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);updateRakeMovementAnimation();
     }
