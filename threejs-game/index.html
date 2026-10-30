@@ -151,6 +151,21 @@ function setRakePath(target){
 }
 const rakeTurnHelper=new THREE.Object3D();
 function updateRakeMovementAnimation(){const movingSpeed=rake.actualMoveSpeed||0;if(movingSpeed<.15){play(rake,'idle');return}play(rake,(rake.runAnimUntil||0)>elapsed?'run':'walk')}
+function moveRakeToward(goal,speed,dt){
+  rake.actualMoveSpeed=0;
+  const dx=goal.x-rake.pos.x,dz=goal.z-rake.pos.z,len=Math.hypot(dx,dz);
+  if(len<.12)return;
+  const step=Math.min(speed*dt,len),base=Math.atan2(dz,dx);
+  const offsets=[0,.45,-.45,.9,-.9,1.35,-1.35,Math.PI];
+  for(const offset of offsets){
+    const angle=base+offset,nx=rake.pos.x+Math.cos(angle)*step,nz=rake.pos.z+Math.sin(angle)*step;
+    if(blocked(nx,nz))continue;
+    rake.pos.x=nx;rake.pos.z=nz;rake.group.position.x=nx;rake.group.position.z=nz;
+    rake.actualMoveSpeed=dt>0?step/dt:0;
+    rake.group.rotation.y=Math.atan2(Math.cos(angle),Math.sin(angle));
+    return;
+  }
+}
 function moveRakePath(speed,dt){
   rake.actualMoveSpeed=0;
   if(!rake.path?.length||rake.pathIndex>=rake.path.length)return;
@@ -195,8 +210,9 @@ const validTargets=[...occupiedCells.values()].sort((a,b)=>a.cellD-b.cellD);
 const visibleTargets=validTargets.filter(v=>v.visible&&v.d<=45);let found=visibleTargets.find(v=>v.target!==rake.ignoreTarget)||visibleTargets[0]||null;
 if(found){rake.lastSeenCell={x:found.cell.x,z:found.cell.z};rake.searchTimer=3;rake.searching=false}
 else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){rake.searchTimer=Math.max(0,rake.searchTimer-dt);rake.searching=true;found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true}}
-else if(validTargets.length){const occupied=validTargets.find(v=>v.target!==rake.ignoreTarget)||validTargets[0];rake.searching=true;found={target:null,cell:{x:occupied.cell.x,z:occupied.cell.z},d:Infinity,cellD:occupied.cellD,visible:false,searching:true}}else{rake.searching=false;found=null}
+else if(validTargets.length){if(!rake.patrolCell||!validTargets.some(v=>v.target===rake.patrolCell.target)){const choices=validTargets.filter(v=>v.target!==rake.ignoreTarget);const pool=choices.length?choices:validTargets;rake.patrolCell=pool[Math.floor(Math.random()*pool.length)]}const occupied=rake.patrolCell;rake.searching=true;found={target:null,cell:{x:occupied.cell.x,z:occupied.cell.z},d:Infinity,cellD:occupied.cellD,visible:false,searching:true}}else{rake.searching=false;found=null}
 if(found){
+  if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.targetHits=0;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
   const goal=found.target?found.target.pos:found.cell;
   if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){setRakePath(goal);rake.think=.8}
@@ -213,10 +229,10 @@ if(found){
       if(rake.attack<=0){rakeDamageTarget(found.target,found.target.kind==='player'?30:24);rake.targetHits=(rake.targetHits||0)+1;rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack');if(rake.targetHits>=2){rake.ignoreTarget=found.target;rake.target=null;rake.targetHits=0;rake.path=[];rake.pathGoal=null;rake.pathFailed=false;rake.think=0;notify('The Rake is moving on to another target!')}}
       else if(rake.attackAnimTimer>0)play(rake,'attack');else play(rake,'idle');
     }else{
-      rake.attackAnimTimer=0;moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation();
+      rake.attackAnimTimer=0;moveRakePath(rakeSpeed,dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);updateRakeMovementAnimation();
     }
   }else{
-    moveRakePath(Math.max(1,Math.min(19,rakeSpeed*.6)),dt);if(found.searching&&rake.actualMoveSpeed<.15){if(!play(rake,'search'))play(rake,'idle')}else updateRakeMovementAnimation();rake.target=null;
+    moveRakePath(Math.max(1,Math.min(19,rakeSpeed*.6)),dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,Math.max(1,Math.min(19,rakeSpeed*.6)),dt);if(found.searching&&rake.actualMoveSpeed<.15){if(!play(rake,'search'))play(rake,'idle')}else updateRakeMovementAnimation();rake.target=null;
   }
 }else{
   rake.target=null;rake.searching=false;rake.patrolGoal=null;rake.pathGoal=null;rake.path=[];play(rake,'idle');
