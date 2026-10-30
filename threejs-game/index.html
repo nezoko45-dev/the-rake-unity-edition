@@ -124,48 +124,40 @@ function setPath(actor,target){
   // Allies retain lightweight local steering; the Rake uses the global A* route below.
   actor.pathGoal={x:target.x,z:target.z};actor.path=[actor.pathGoal];actor.pathIndex=0;actor.pathFailed=false;
 }
-function rakeCellKey(x,z){return x+','+z}
-function rakeCellBlocked(cx,cz){
-  const x=cx*HEAT_CELL,z=cz*HEAT_CELL;
-  return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+NAV_CLEARANCE);
+// Waypoint navigation: route around blocking trees without grid cells.
+function segmentBlocked(ax,az,bx,bz){
+  const dx=bx-ax,dz=bz-az,len2=dx*dx+dz*dz;
+  for(const o of obstacles){
+    const t=len2>0?THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/len2,0,1):0;
+    const px=ax+dx*t,pz=az+dz*t;
+    if(Math.hypot(px-o.x,pz-o.z)<o.r+NAV_CLEARANCE)return o;
+  }
+  return null;
 }
 function rakeFindPath(start,goal){
-  const sx=Math.round(start.x/HEAT_CELL),sz=Math.round(start.z/HEAT_CELL);
-  const gx=Math.round(goal.x/HEAT_CELL),gz=Math.round(goal.z/HEAT_CELL);
-  const margin=24,minX=Math.min(sx,gx)-margin,maxX=Math.max(sx,gx)+margin;
-  const minZ=Math.min(sz,gz)-margin,maxZ=Math.max(sz,gz)+margin;
-  const key=rakeCellKey,open=[],gScore=new Map(),came=new Map(),closed=new Set();
-  const heuristic=(x,z)=>Math.hypot(gx-x,gz-z);
-  const push=(node)=>{let i=open.length;open.push(node);while(i>0){const p=(i-1)>>1;if(open[p].f<=node.f)break;open[i]=open[p];i=p}open[i]=node};
-  const pop=()=>{const root=open[0],last=open.pop();if(open.length){let i=0;while(true){let c=i*2+1;if(c>=open.length)break;if(c+1<open.length&&open[c+1].f<open[c].f)c++;if(open[c].f>=last.f)break;open[i]=open[c];i=c}open[i]=last}return root};
-  const startKey=key(sx,sz);gScore.set(startKey,0);push({x:sx,z:sz,k:startKey,g:0,f:heuristic(sx,sz)});
-  const dirs=[[-1,0,1],[1,0,1],[0,-1,1],[0,1,1],[-1,-1,1.4142],[-1,1,1.4142],[1,-1,1.4142],[1,1,1.4142]];
-  let reached=null,iterations=0;
-  while(open.length&&iterations++<60000){
-    const cur=pop();if(closed.has(cur.k))continue;closed.add(cur.k);
-    if(cur.x===gx&&cur.z===gz){reached=cur.k;break}
-    for(const [dx,dz,cost] of dirs){
-      const nx=cur.x+dx,nz=cur.z+dz,nk=key(nx,nz);
-      if(nx<minX||nx>maxX||nz<minZ||nz>maxZ||closed.has(nk)||rakeCellBlocked(nx,nz))continue;
-      if(dx&&dz&&(rakeCellBlocked(cur.x+dx,cur.z)||rakeCellBlocked(cur.x,cur.z+dz)))continue;
-      const ng=cur.g+cost;
-      if(ng<(gScore.get(nk)??Infinity)){gScore.set(nk,ng);came.set(nk,cur.k);push({x:nx,z:nz,k:nk,g:ng,f:ng+heuristic(nx,nz)})}
+  const points=[],from={x:start.x,z:start.z},to={x:goal.x,z:goal.z};
+  let ax=from.x,az=from.z;
+  for(let pass=0;pass<12;pass++){
+    const hit=segmentBlocked(ax,az,to.x,to.z);
+    if(!hit){points.push(to);return points}
+    const dx=to.x-ax,dz=to.z-az,len=Math.hypot(dx,dz)||1;
+    const ux=dx/len,uz=dz/len,sideX=-uz,sideZ=ux;
+    const clearance=hit.r+NAV_CLEARANCE+1.15;
+    const candidates=[
+      {x:hit.x+sideX*clearance,z:hit.z+sideZ*clearance},
+      {x:hit.x-sideX*clearance,z:hit.z-sideZ*clearance}
+    ];
+    let best=null,bestScore=Infinity;
+    for(const p of candidates){
+      if(blocked(p.x,p.z)||segmentBlocked(ax,az,p.x,p.z))continue;
+      const score=Math.hypot(p.x-ax,p.z-az)+Math.hypot(to.x-p.x,to.z-p.z);
+      if(score<bestScore){best=p;bestScore=score}
     }
+    if(!best)return null;
+    points.push(best);ax=best.x;az=best.z;
   }
-  if(!reached){
-    // If the exact goal cell is obstructed, route to the nearest walkable cell around it.
-    let best=null,bd=Infinity;
-    for(let radius=1;radius<=8;radius++)for(let dx=-radius;dx<=radius;dx++)for(let dz=-radius;dz<=radius;dz++){
-      if(Math.max(Math.abs(dx),Math.abs(dz))!==radius)continue;
-      const x=gx+dx,z=gz+dz,k=key(x,z),g=gScore.get(k);
-      if(g!==undefined&&g+heuristic(x,z)<bd){best=k;bd=g+heuristic(x,z)}
-    }
-    reached=best;
-  }
-  if(!reached)return null;
-  const cells=[];let k=reached;
-  while(k&&k!==startKey){const [x,z]=k.split(',').map(Number);cells.push({x:x*HEAT_CELL,z:z*HEAT_CELL});k=came.get(k)}
-  cells.reverse();return cells;
+  if(!segmentBlocked(ax,az,to.x,to.z)){points.push(to);return points}
+  return null;
 }
 function setRakePath(target){
   const route=rakeFindPath(rake.pos,target);
