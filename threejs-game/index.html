@@ -26,6 +26,8 @@ window.addEventListener('unhandledrejection',function(e){
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { init as initRecast, NavMeshQuery } from 'https://cdn.jsdelivr.net/npm/@recast-navigation/core@0.35.0/dist/index.mjs';
+import { threeToSoloNavMesh } from 'https://cdn.jsdelivr.net/npm/@recast-navigation/three@0.35.0/dist/index.mjs';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
@@ -38,11 +40,17 @@ const ambientLight=new THREE.HemisphereLight(0xd8e7f0,0x3d4932,2.6);scene.add(am
 const sun=new THREE.DirectionalLight(0xffe0ad,2.2);sun.position.set(-35,60,20);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);scene.add(sun);
 const mat=(c,r=.95)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;ground.position.y=-.035;scene.add(ground);
-const obstacles=[],trees=[],treeMeshes=[];let seed=991;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
+const obstacles=[],trees=[],treeMeshes=[];let seed=991;
+let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;
+const navFloorGeometry=new THREE.PlaneGeometry(FOREST_CHUNK*5,FOREST_CHUNK*5);
+async function initializeRecast(){try{await initRecast();recastReady=true;console.info('Recast Navigation initialized');queueForestNavMeshBuild()}catch(err){console.error('Recast initialization failed:',err);notify('Navigation system failed to initialize. Refresh the game.')}}
+function queueForestNavMeshBuild(){if(!recastReady||navBuildQueued)return;navBuildQueued=true;const version=++navBuildVersion;setTimeout(()=>{navBuildQueued=false;buildForestNavMesh(version)},180)}
+function buildForestNavMesh(version){if(!recastReady)return;const cx=Math.floor(player.pos.x/FOREST_CHUNK),cz=Math.floor(player.pos.z/FOREST_CHUNK);const floor=new THREE.Mesh(navFloorGeometry);floor.rotation.x=-Math.PI/2;floor.position.set((cx+.5)*FOREST_CHUNK,(cz+.5)*FOREST_CHUNK,0);/* position corrected below: nav plane is centered on the active player chunk */floor.position.set(cx*FOREST_CHUNK,0,cz*FOREST_CHUNK);const navMeshes=[floor];const blockerGeometry=new THREE.CylinderGeometry(.9,.9,2.8,8);const blockerMaterial=new THREE.MeshBasicMaterial();for(const o of obstacles){const blocker=new THREE.Mesh(blockerGeometry,blockerMaterial);blocker.position.set(o.x,1.4,o.z);navMeshes.push(blocker)}let generated;try{generated=threeToSoloNavMesh(navMeshes,{cs:.5,ch:.2,walkableRadius:2,walkableHeight:4,walkableClimb:1,walkableSlopeAngle:45});}catch(err){console.error('Recast navmesh generation threw:',err);return}if(!generated?.success||!generated.navMesh){console.warn('Recast could not generate a forest navmesh');return}const nextQuery=new NavMeshQuery(generated.navMesh);const previousMesh=forestNavMesh,previousQuery=forestNavQuery;forestNavMesh=generated.navMesh;forestNavQuery=nextQuery;if(previousQuery)previousQuery.destroy();if(previousMesh)previousMesh.destroy();console.info('Recast forest navmesh generated from',obstacles.length,'tree obstacles');}
+function findNavPath(start,goal){if(!forestNavQuery)return null;const result=forestNavQuery.computePath({x:start.x,y:0,z:start.z},{x:goal.x,y:0,z:goal.z},{halfExtents:{x:8,y:8,z:8},maxPathPolys:512,maxStraightPathPoints:128});if(!result.success||!result.path?.length)return null;return result.path.map(p=>({x:p.x,z:p.z}))}function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
 const FOREST_CHUNK=40,FOREST_RADIUS=2,forestChunks=new Map();let lastForestAnchor='';
 function chunkRandFactory(cx,cz){let state=(Math.imul(cx+8191,73856093)^Math.imul(cz+8191,19349663)^991)>>>0;return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296}}
 function buildForestChunk(cx,cz){const key=cx+','+cz;if(forestChunks.has(key))return;const rr=chunkRandFactory(cx,cz),meshes=[],chunkTrees=[];for(let i=0;i<30;i++){const x=cx*FOREST_CHUNK+rr()*FOREST_CHUNK,z=cz*FOREST_CHUNK+rr()*FOREST_CHUNK;if(Math.hypot(x,z)<9||Math.hypot(x+43,z+43)<7)continue;const h=3+rr()*7,r=.35+rr()*.55;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(r*.65,r,h,7),mat(0x40352a));trunk.position.set(x,h/2,z);trunk.castShadow=false;scene.add(trunk);meshes.push(trunk);const crown=new THREE.Mesh(new THREE.ConeGeometry(1.7+rr()*1.4,4+rr()*4,7),mat(rr()>.5?0x1c3428:0x263d2c));crown.position.set(x,h+1.4,z);crown.castShadow=false;scene.add(crown);meshes.push(crown);chunkTrees.push({x,z,r:r+1.0});}forestChunks.set(key,{meshes,trees:chunkTrees,cx,cz});}
-function updateForestChunks(){const anchors=[player.pos,rake.pos,...allies.filter(a=>a.alive).map(a=>a.pos)];const anchorKey=anchors.map(p=>Math.floor(p.x/FOREST_CHUNK)+','+Math.floor(p.z/FOREST_CHUNK)).join('|');if(anchorKey===lastForestAnchor)return;lastForestAnchor=anchorKey;const wanted=new Set();for(const p of anchors){const cx=Math.floor(p.x/FOREST_CHUNK),cz=Math.floor(p.z/FOREST_CHUNK);for(let dx=-FOREST_RADIUS;dx<=FOREST_RADIUS;dx++)for(let dz=-FOREST_RADIUS;dz<=FOREST_RADIUS;dz++){const x=cx+dx,z=cz+dz,key=x+','+z;wanted.add(key);buildForestChunk(x,z)}}for(const [key,c] of forestChunks){if(!wanted.has(key)){for(const m of c.meshes){scene.remove(m);m.geometry.dispose();if(m.material&&m.material.dispose)m.material.dispose()}forestChunks.delete(key)}}obstacles.length=0;trees.length=0;treeMeshes.length=0;for(const c of forestChunks.values()){obstacles.push(...c.trees.map(o=>({x:o.x,z:o.z,r:o.r+0.1})));trees.push(...c.trees);treeMeshes.push(...c.meshes)}for(const a of allies){if(a.alive&&blocked(a.pos.x,a.pos.z)){const safe=randomAISpawn();a.pos.copy(safe);a.spawn.copy(safe);a.group.position.copy(safe);a.path=[];a.pathGoal=null;a.think=0}}}
+function updateForestChunks(){const anchors=[player.pos,rake.pos,...allies.filter(a=>a.alive).map(a=>a.pos)];const anchorKey=anchors.map(p=>Math.floor(p.x/FOREST_CHUNK)+','+Math.floor(p.z/FOREST_CHUNK)).join('|');if(anchorKey===lastForestAnchor)return;lastForestAnchor=anchorKey;const wanted=new Set();for(const p of anchors){const cx=Math.floor(p.x/FOREST_CHUNK),cz=Math.floor(p.z/FOREST_CHUNK);for(let dx=-FOREST_RADIUS;dx<=FOREST_RADIUS;dx++)for(let dz=-FOREST_RADIUS;dz<=FOREST_RADIUS;dz++){const x=cx+dx,z=cz+dz,key=x+','+z;wanted.add(key);buildForestChunk(x,z)}}for(const [key,c] of forestChunks){if(!wanted.has(key)){for(const m of c.meshes){scene.remove(m);m.geometry.dispose();if(m.material&&m.material.dispose)m.material.dispose()}forestChunks.delete(key)}}obstacles.length=0;trees.length=0;treeMeshes.length=0;for(const c of forestChunks.values()){obstacles.push(...c.trees.map(o=>({x:o.x,z:o.z,r:o.r+0.1})));trees.push(...c.trees);treeMeshes.push(...c.meshes)}queueForestNavMeshBuild();for(const a of allies){if(a.alive&&blocked(a.pos.x,a.pos.z)){const safe=randomAISpawn();a.pos.copy(safe);a.spawn.copy(safe);a.group.position.copy(safe);a.path=[];a.pathGoal=null;a.think=0}}}
 
 const camp=new THREE.Group();for(let i=0;i<4;i++){const b=new THREE.Mesh(new THREE.CylinderGeometry(.08,.13,1.7,6),mat(0x5c4631));b.position.set(Math.cos(i*Math.PI/2)*1.4,.85,Math.sin(i*Math.PI/2)*1.4);b.rotation.z=(i%2?-.7:.7);camp.add(b)}const fire=new THREE.PointLight(0xff7c26,8,16);fire.position.set(0,1,0);camp.add(fire);scene.add(camp);camp.position.set(-43,0,-43);
 const loader=new GLTFLoader();let rakeTemplate=null,animations=[];const mixers=[];
@@ -57,7 +65,7 @@ function makeActor(kind,x,z,color){const g=new THREE.Group();const isRake=kind==
 const player={kind:'player',pos:controls.getObject().position,hp:100,maxHp:100,alive:true,attack:0,respawn:0};const RAKE_SPAWN=new THREE.Vector3(-43,0,-43);let rake=makeActor('rake',RAKE_SPAWN.x,RAKE_SPAWN.z,0x77786d);rake.pos.copy(RAKE_SPAWN);rake.spawn=RAKE_SPAWN.clone();rake.group.position.copy(rake.pos);rake.isRake=true;
 function randomAISpawn(){for(let tries=0;tries<800;tries++){const x=(rand()-.5)*320,z=(rand()-.5)*320;if(Math.hypot(x,z)<18||Math.hypot(x+43,z+43)<10)continue;if(!walkablePoint(x,z))continue;return new THREE.Vector3(x,0,z)}return new THREE.Vector3(70,0,-70)}
 const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeActor('ally',spawn.x,spawn.z,[0x536d87,0x89775e,0x677d6a,0x82718c][i]);a.spawn=spawn.clone();allies.push(a)}
-loadRake();
+loadRake();\nvoid initializeRecast();
 // Use paths relative to this module, so GitHub Pages serves the files from
 // /the-rake-unity-edition/Assets/ even when the game is hosted in a subfolder.
 const dayMusic=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url).href);
@@ -121,8 +129,9 @@ const rakeGroundRay=new THREE.Raycaster();const rakeGroundOrigin=new THREE.Vecto
 function floatRakeAboveGround(actor,dt){if(!actor?.isRake||!actor.group)return;const x=actor.pos.x,z=actor.pos.z;rakeGroundOrigin.set(x,120,z);rakeGroundRay.set(rakeGroundOrigin,rakeGroundDown);rakeGroundRay.far=240;const hits=rakeGroundRay.intersectObject(ground,false);if(!hits.length)return;const targetY=hits[0].point.y+(actor.groundOffset??.05);const currentY=Number.isFinite(actor.pos.y)?actor.pos.y:actor.group.position.y;const adjustedY=THREE.MathUtils.damp(currentY,targetY,12,dt||.016);actor.pos.y=adjustedY;actor.group.position.y=adjustedY}
 function hasLineOfSight(from,to){const dx=to.pos.x-from.pos.x,dz=to.pos.z-from.pos.z,len=Math.hypot(dx,dz);if(len<.01)return true;for(const o of obstacles){const t=Math.max(0,Math.min(1,((o.x-from.pos.x)*dx+(o.z-from.pos.z)*dz)/(len*len)));const px=from.pos.x+dx*t,pz=from.pos.z+dz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+.25)return false}return true}
 function setPath(actor,target){
-  // Allies retain lightweight local steering; the Rake uses the global A* route below.
-  actor.pathGoal={x:target.x,z:target.z};actor.path=[actor.pathGoal];actor.pathIndex=0;actor.pathFailed=false;
+  actor.pathGoal={x:target.x,z:target.z};actor.pathIndex=0;
+  const route=findNavPath(actor.pos,target);
+  actor.path=route||[];actor.pathFailed=!route||!route.length;
 }
 // Waypoint navigation: route around blocking trees without grid cells.
 function segmentBlocked(ax,az,bx,bz){
@@ -134,31 +143,7 @@ function segmentBlocked(ax,az,bx,bz){
   }
   return null;
 }
-function rakeFindPath(start,goal){
-  const points=[],from={x:start.x,z:start.z},to={x:goal.x,z:goal.z};
-  let ax=from.x,az=from.z;
-  for(let pass=0;pass<12;pass++){
-    const hit=segmentBlocked(ax,az,to.x,to.z);
-    if(!hit){points.push(to);return points}
-    const dx=to.x-ax,dz=to.z-az,len=Math.hypot(dx,dz)||1;
-    const ux=dx/len,uz=dz/len,sideX=-uz,sideZ=ux;
-    const clearance=hit.r+NAV_CLEARANCE+1.15;
-    const candidates=[
-      {x:hit.x+sideX*clearance,z:hit.z+sideZ*clearance},
-      {x:hit.x-sideX*clearance,z:hit.z-sideZ*clearance}
-    ];
-    let best=null,bestScore=Infinity;
-    for(const p of candidates){
-      if(blocked(p.x,p.z)||segmentBlocked(ax,az,p.x,p.z))continue;
-      const score=Math.hypot(p.x-ax,p.z-az)+Math.hypot(to.x-p.x,to.z-p.z);
-      if(score<bestScore){best=p;bestScore=score}
-    }
-    if(!best)return null;
-    points.push(best);ax=best.x;az=best.z;
-  }
-  if(!segmentBlocked(ax,az,to.x,to.z)){points.push(to);return points}
-  return null;
-}
+function rakeFindPath(start,goal){return findNavPath(start,goal)}
 function setRakePath(target){
   const route=rakeFindPath(rake.pos,target);
   rake.path=route||[];rake.pathIndex=0;rake.pathGoal={x:target.x,z:target.z};
@@ -181,35 +166,16 @@ function moveRakePath(speed,dt){
   }else{rake.pathFailed=true;rake.path=[];rake.pathIndex=0}
 }
 function movePath(actor,speed,dt){
-  const goal=actor.pathGoal;if(!goal)return;
-  const gx=goal.x-actor.pos.x,gz=goal.z-actor.pos.z,gd=Math.hypot(gx,gz);
-  if(gd<1.25){actor.path=[];actor.pathIndex=0;actor.think=0;return}
-  // Sample a local potential/heatmap in 16 directions. Reward progress toward
-  // the goal and clearance from obstacles; reject blocked steps and corner cutting.
-  const dirs=16,look=Math.max(1.8,Math.min(4.2,speed*.42)),step=Math.min(speed*dt,look);
-  let best=null,bestScore=-Infinity;
-  for(let i=0;i<dirs;i++){
-    const ang=i*Math.PI*2/dirs,dx=Math.sin(ang),dz=Math.cos(ang);
-    let score=(gx*dx+gz*dz)/gd*3.2;
-    let clear=Infinity,blockedAhead=false;
-    for(const o of obstacles){
-      const ox=actor.pos.x+dx*look-o.x,oz=actor.pos.z+dz*look-o.z;
-      const edge=Math.hypot(ox,oz)-o.r-NAV_CLEARANCE;
-      if(edge<clear)clear=edge;
-      if(Math.hypot(actor.pos.x+dx*step-o.x,actor.pos.z+dz*step-o.z)<o.r+.12)blockedAhead=true;
-    }
-    if(blockedAhead)continue;
-    score+=Math.min(3,Math.max(-5,clear))*.9;
-    // A small side-step bias breaks ties when the actor is facing an obstacle.
-    score-=Math.abs(ang-Math.atan2(gx,gz))*.0001;
-    if(score>bestScore){bestScore=score;best={dx,dz}}
-  }
-  if(!best){actor.path=[];actor.pathIndex=0;actor.think=0;actor.pathFailed=true;return}
-  const beforeX=actor.pos.x,beforeZ=actor.pos.z;
-  clearMove(actor,best.dx*step,best.dz*step);
-  actor.group.rotation.y=Math.atan2(best.dx,best.dz);
-  if(Math.hypot(actor.pos.x-beforeX,actor.pos.z-beforeZ)<.01){actor.path=[];actor.pathIndex=0;actor.think=0;actor.pathFailed=true}
-  else actor.pathFailed=false;
+  if(!actor.path?.length||actor.pathIndex>=actor.path.length){actor.pathFailed=true;actor.think=0;return}
+  let node=actor.path[actor.pathIndex];
+  while(node&&distance(actor.pos,node)<.7){actor.pathIndex++;node=actor.path[actor.pathIndex]}
+  if(!node){actor.path=[];actor.pathIndex=0;actor.pathGoal=null;return}
+  const dx=node.x-actor.pos.x,dz=node.z-actor.pos.z,len=Math.hypot(dx,dz);
+  if(len<.001)return;
+  const step=Math.min(speed*dt,len),nx=actor.pos.x+dx/len*step,nz=actor.pos.z+dz/len*step;
+  if(blocked(nx,nz)){actor.path=[];actor.pathIndex=0;actor.pathFailed=true;actor.think=0;return}
+  actor.pos.x=nx;actor.pos.z=nz;actor.group.position.x=nx;actor.group.position.z=nz;
+  actor.group.rotation.y=Math.atan2(dx,dz);
 }
 function damage(target,n){if(!target.alive)return;if(target.isRake&&target.parryTimer>0){if(!target.parryNotice){notify('The Rake deflected the hit!');target.parryNotice=true}return;}target.hp-=n;if(target.hp<=0){target.hp=0;target.alive=false;if(target.kind==='ally'){target.respawn=5;target.group.visible=false;notify('A survivor is down — backup in 5 seconds')}else if(target.kind==='player'){target.respawn=4;controls.unlock();notify('You were killed — respawning in 4 seconds...')}else{target.respawn=12;target.group.visible=false;notify('The Rake is down... for now.')}}}
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,2.05,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;controls.getObject().updateMatrixWorld(true);notify('You have respawned!');}
