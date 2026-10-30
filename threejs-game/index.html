@@ -41,7 +41,10 @@ const sun=new THREE.DirectionalLight(0xffe0ad,2.2);sun.position.set(-35,60,20);s
 const mat=(c,r=.95)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;ground.position.y=-.035;scene.add(ground);
 const obstacles=[],trees=[],treeMeshes=[];let seed=991;
-let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;\nlet rakeKills=0,rakeSpeed=7;\nfunction recordRakeKill(){rakeKills++;rakeSpeed=1+Math.floor(Math.random()*19);if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s')+' — speed now '+rakeSpeed);console.info('Rake kill count:',rakeKills,'new speed:',rakeSpeed)}\nfunction rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
+let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;
+let rakeKills=0,rakeSpeed=7;
+function recordRakeKill(){rakeKills++;rakeSpeed=1+Math.floor(Math.random()*19);if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s')+' — speed now '+rakeSpeed);console.info('Rake kill count:',rakeKills,'new speed:',rakeSpeed)}
+function rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
 const navFloorGeometry=new THREE.PlaneGeometry(FOREST_CHUNK*5,FOREST_CHUNK*5);
 async function initializeRecast(){try{await initRecast();recastReady=true;console.info('Recast Navigation initialized');queueForestNavMeshBuild()}catch(err){console.error('Recast initialization failed:',err);notify('Navigation system failed to initialize. Refresh the game.')}}
 function queueForestNavMeshBuild(){if(!recastReady||navBuildQueued)return;navBuildQueued=true;const version=++navBuildVersion;setTimeout(()=>{navBuildQueued=false;buildForestNavMesh(version)},180)}
@@ -65,7 +68,8 @@ function makeActor(kind,x,z,color){const g=new THREE.Group();const isRake=kind==
 const player={kind:'player',pos:controls.getObject().position,hp:100,maxHp:100,alive:true,attack:0,respawn:0};const RAKE_SPAWN=new THREE.Vector3(-43,0,-43);let rake=makeActor('rake',RAKE_SPAWN.x,RAKE_SPAWN.z,0x77786d);rake.pos.copy(RAKE_SPAWN);rake.spawn=RAKE_SPAWN.clone();rake.group.position.copy(rake.pos);rake.isRake=true;
 function randomAISpawn(){for(let tries=0;tries<800;tries++){const x=(rand()-.5)*320,z=(rand()-.5)*320;if(Math.hypot(x,z)<18||Math.hypot(x+43,z+43)<10)continue;if(!walkablePoint(x,z))continue;return new THREE.Vector3(x,0,z)}return new THREE.Vector3(70,0,-70)}
 const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeActor('ally',spawn.x,spawn.z,[0x536d87,0x89775e,0x677d6a,0x82718c][i]);a.spawn=spawn.clone();allies.push(a)}
-loadRake();\nvoid initializeRecast();
+loadRake();
+void initializeRecast();
 // Use paths relative to this module, so GitHub Pages serves the files from
 // /the-rake-unity-edition/Assets/ even when the game is hosted in a subfolder.
 const dayMusic=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url).href);
