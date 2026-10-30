@@ -118,6 +118,25 @@ document.getElementById('start').onclick=()=>{gameStarted=true;window.__gameStar
 function makeHealthBar(){const el=document.createElement('div');el.className='worldbar';el.innerHTML='<i></i>';document.getElementById('worldBars').appendChild(el);return el}
 function updateHealthBar(a){if(!a.healthBar)return;const el=a.healthBar;if(!a.alive||a.isRake){el.style.display='none';return}el.style.display='block';el.classList.toggle('downed',!!a.downed);if(a.kind==='ally'&&player.alive&&!hasLineOfSight(player,a)){el.style.display='none';return}const p=new THREE.Vector3(a.pos.x,a.pos.y+(a.kind==='player'?2.55:2.25),a.pos.z).project(camera);if(p.z>1||p.z< -1){el.style.display='none';return}el.style.left=((p.x*.5+.5)*innerWidth)+'px';el.style.top=((-p.y*.5+.5)*innerHeight)+'px';el.firstElementChild.style.width=(Math.max(0,a.hp/(a.maxHp||100))*100)+'%'}
 function distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
+// Vibration hunting: actors only become detectable after moving.
+const vibrationEvents=[];
+function emitVibration(source,range,strength){
+  vibrationEvents.push({source,x:source.pos.x,z:source.pos.z,range,strength,time:elapsed});
+  if(vibrationEvents.length>40)vibrationEvents.splice(0,vibrationEvents.length-40);
+}
+function updateActorVibration(actor,range,interval){
+  if(!actor?.alive)return;
+  const p=actor.pos;
+  if(!actor.vibrationPos)actor.vibrationPos={x:p.x,z:p.z};
+  const moved=Math.hypot(p.x-actor.vibrationPos.x,p.z-actor.vibrationPos.z);
+  actor.vibrationPos.x=p.x;actor.vibrationPos.z=p.z;
+  actor.vibrationCooldown=Math.max(0,(actor.vibrationCooldown||0)-dtVibration);
+  if(moved>.025&&actor.vibrationCooldown<=0){
+    emitVibration(actor,range,range);
+    actor.vibrationCooldown=interval;
+  }
+}
+let dtVibration=.016;
 // Local navigation heatmap: each grid cell is walkable or blocked by tree clearance.
 // A breadth-first distance field from the target gives actors a cheap downhill route; no A* graph.
 const NAV_CLEARANCE=.55,HEAT_CELL=2.5,HEAT_SIZE=41,HEAT_HALF=Math.floor(HEAT_SIZE/2);
@@ -201,14 +220,24 @@ function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(player.hp<=35&&player.alive){if(distance(a.pos,player.pos)>2.5){if(a.think<=0||!a.path?.length){setPath(a,player.pos);a.think=.5}movePath(a,3.5,dt);play(a,'walk')}else play(a,'idle');return}if(rake.alive&&d<24){if(a.think<=0||!a.path?.length||a.pathFailed){setPath(a,rake.pos);a.think=.55}if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{movePath(a,4.2,dt);play(a,'walk')}}else{if(a.think<=0||!a.pathGoal||!a.path?.length||a.pathFailed){let found=false;for(let tries=0;tries<30;tries++){const angle=rand()*Math.PI*2,rad=6+rand()*12,x=player.pos.x+Math.cos(angle)*rad,z=player.pos.z+Math.sin(angle)*rad;if(walkablePoint(x,z)&&distance(a.pos,{x,z})>3){setPath(a,{x,z});found=true;break}}if(!found){const angle=rand()*Math.PI*2;setPath(a,{x:a.pos.x+Math.cos(angle)*5,z:a.pos.z+Math.sin(angle)*5})}a.think=2+rand()*2}if(a.pathGoal&&distance(a.pos,a.pathGoal)>1.3){movePath(a,2.1,dt);play(a,'walk')}else{a.path=[];a.pathGoal=null;play(a,'idle')}}}
-function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.targetHits=0;rake.lastSeenCell=null;rake.searchTimer=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
-/* Track occupied cells of visible survivors. If everyone is out of sight, play the dedicated search animation while searching the last seen cell for up to 3 seconds, then resume scanning occupied cells. */
-const occupiedCells=new Map();
-const addOccupiedCell=target=>{const cx=Math.round(target.pos.x/HEAT_CELL),cz=Math.round(target.pos.z/HEAT_CELL),key=cx+','+cz,cell={x:cx*HEAT_CELL,z:cz*HEAT_CELL};if(!occupiedCells.has(key))occupiedCells.set(key,{target,cell,d:distance(rake.pos,target.pos),cellD:distance(rake.pos,cell),visible:hasLineOfSight(rake,target)});else{const entry=occupiedCells.get(key);if(distance(rake.pos,target.pos)<entry.d){entry.target=target;entry.d=distance(rake.pos,target.pos);entry.visible=hasLineOfSight(rake,target)}}};
-if(player.alive)addOccupiedCell(player);for(const a of allies){if(a.alive)addOccupiedCell(a)}
-const validTargets=[...occupiedCells.values()].sort((a,b)=>a.cellD-b.cellD);
-const visibleTargets=validTargets.filter(v=>v.visible&&v.d<=45);
-let found=visibleTargets[0]||null;
+function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+/* The Rake hunts only recent movement vibrations. Stationary actors are invisible to it. */
+const activeVibrations=vibrationEvents.filter(v=>elapsed-v.time<=2.2&&v.source?.alive&&distance(rake.pos,{x:v.x,z:v.z})<=v.range);
+let found=null;
+if(activeVibrations.length){
+  activeVibrations.sort((a,b)=>(b.strength-(elapsed-b.time)*3)-(a.strength-(elapsed-a.time)*3));
+  const pulse=activeVibrations[0];
+  found={target:pulse.source,cell:{x:pulse.x,z:pulse.z},d:distance(rake.pos,pulse.source.pos),cellD:distance(rake.pos,{x:pulse.x,z:pulse.z}),visible:hasLineOfSight(rake,pulse.source),vibration:true};
+  rake.lastSeenCell={x:pulse.x,z:pulse.z};
+  rake.searchTimer=2.2;
+  rake.searching=false;
+}else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
+  rake.searchTimer=Math.max(0,rake.searchTimer-dt);
+  rake.searching=true;
+  found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true};
+}else{
+  rake.lastSeenCell=null;rake.searchTimer=0;rake.searching=false;
+}
 if(found){
   rake.lastSeenCell={x:found.cell.x,z:found.cell.z};
   rake.searchTimer=3;rake.searching=false;
@@ -240,7 +269,7 @@ if(found){
 }
 if(found){
   if(found.target){rake.patrolCell=null}
-  if(found.target&&rake.target!==found.target){rake.target=found.target;rake.targetHits=0;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
+  if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
   const goal=found.target?found.target.pos:found.cell;
   if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){setRakePath(goal);rake.think=.8}
   else if(found.target&&distance(rake.pathGoal,goal)>5){setRakePath(goal);rake.think=.8}
@@ -274,7 +303,7 @@ if(found){
   rake.target=null;rake.searching=false;rake.patrolGoal=null;rake.pathGoal=null;rake.path=[];play(rake,'idle');
 }floatRakeAboveGround(rake,dt)}
 function updateDayNight(){const t=elapsed%DAY_LENGTH;const isNight=t>=DAY_LENGTH*.25;if(isNight!==night){night=isNight;notify(night?'NIGHT FALLS — THE RAKE IS HUNTING':'DAYBREAK — THE RAKE IS RETREATING');}const k=night?1:0;scene.background.lerpColors(new THREE.Color(0x91a9b3),new THREE.Color(0x000000),k);scene.fog.color.copy(scene.background);scene.fog.near=night?2:48;scene.fog.far=night?24:150;sun.intensity=night?0:2.2;ambientLight.intensity=night?0.015:2.6;ambientLight.color.set(night?0x020309:0xd8e7f0);ambientLight.groundColor.set(night?0x000000:0x3d4932);fire.intensity=night?2:5;flashlight.intensity=flashlightOn?95:0}
-const hud=document.getElementById('stats');function tick(){requestAnimationFrame(tick);const dt=Math.min(clock.getDelta(),.05);if(window.__gameStartedRequested&&!gameStarted){gameStarted=true;document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look')}}if(gameStarted){elapsed+=dt;updateDayNight();updateMusic(night);updateForestChunks();player.attack=Math.max(0,player.attack-dt);if(playerAttackHeld&&player.attack<=0)strikeRake();if(!player.alive){player.respawn-=dt;if(player.respawn<=0)respawnPlayer()}const move=new THREE.Vector3();if(keys.KeyW)move.z-=1;if(keys.KeyS)move.z+=1;if(keys.KeyA)move.x-=1;if(keys.KeyD)move.x+=1;if(move.lengthSq()){move.normalize();const speed=keys.ShiftLeft||keys.ShiftRight?9:5.5;const forward=new THREE.Vector3();camera.getWorldDirection(forward);forward.y=0;forward.normalize();const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();const delta=forward.multiplyScalar(-move.z).add(right.multiplyScalar(move.x)).multiplyScalar(speed*dt);const p=controls.getObject().position;const x=p.x+delta.x,z=p.z+delta.z;if(!blocked(x,z)){p.x=x;p.z=z}}player.pos=controls.getObject().position;updateRake(dt);allies.forEach(a=>updateAlly(a,dt));for(const m of mixers)m.update(dt);updateRakeHeadTracking();floatRakeAboveGround(rake,dt);hud.innerHTML=('Health: '+player.hp)+(player.alive?'':' (RESPAWNING)')+'<br>Survivors: '+allies.filter(a=>a.alive).length+' / '+allies.length+'<br>Rake: '+(!rake.alive?'down (respawning)':night?'hunting — '+rakeSpeed+' speed':'retreating — '+rakeSpeed+' speed')+'<br>Rake kills: '+rakeKills+'<br>Time: '+(night?'NIGHT':'DAY');document.getElementById('playerHealthFill').style.width=Math.max(0,player.hp)+'%';document.getElementById('playerHealthFill').style.background=player.hp<=35?'#e34c4c':'#64d68a';updateHealthBar(player);allies.forEach(updateHealthBar);if(player.hp<=0)controls.unlock()}renderer.render(scene,camera)}tick();
+const hud=document.getElementById('stats');function tick(){requestAnimationFrame(tick);const dt=Math.min(clock.getDelta(),.05);if(window.__gameStartedRequested&&!gameStarted){gameStarted=true;document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look')}}if(gameStarted){elapsed+=dt;updateDayNight();updateMusic(night);updateForestChunks();player.attack=Math.max(0,player.attack-dt);if(playerAttackHeld&&player.attack<=0)strikeRake();if(!player.alive){player.respawn-=dt;if(player.respawn<=0)respawnPlayer()}const move=new THREE.Vector3();if(keys.KeyW)move.z-=1;if(keys.KeyS)move.z+=1;if(keys.KeyA)move.x-=1;if(keys.KeyD)move.x+=1;if(move.lengthSq()){move.normalize();const speed=keys.ShiftLeft||keys.ShiftRight?9:5.5;const forward=new THREE.Vector3();camera.getWorldDirection(forward);forward.y=0;forward.normalize();const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();const delta=forward.multiplyScalar(-move.z).add(right.multiplyScalar(move.x)).multiplyScalar(speed*dt);const p=controls.getObject().position;const x=p.x+delta.x,z=p.z+delta.z;if(!blocked(x,z)){p.x=x;p.z=z}}player.pos=controls.getObject().position;dtVibration=dt;updateActorVibration(player,keys.ShiftLeft||keys.ShiftRight?55:move.lengthSq()?18:0,keys.ShiftLeft||keys.ShiftRight?.18:.32);allies.forEach(a=>updateAlly(a,dt));for(const a of allies)updateActorVibration(a,4.2,.3);updateRake(dt);for(const m of mixers)m.update(dt);updateRakeHeadTracking();floatRakeAboveGround(rake,dt);hud.innerHTML=('Health: '+player.hp)+(player.alive?'':' (RESPAWNING)')+'<br>Survivors: '+allies.filter(a=>a.alive).length+' / '+allies.length+'<br>Rake: '+(!rake.alive?'down (respawning)':night?'hunting — '+rakeSpeed+' speed':'retreating — '+rakeSpeed+' speed')+'<br>Rake kills: '+rakeKills+'<br>Time: '+(night?'NIGHT':'DAY');document.getElementById('playerHealthFill').style.width=Math.max(0,player.hp)+'%';document.getElementById('playerHealthFill').style.background=player.hp<=35?'#e34c4c':'#64d68a';updateHealthBar(player);allies.forEach(updateHealthBar);if(player.hp<=0)controls.unlock()}renderer.render(scene,camera)}tick();
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 </script>
 </body></html>
