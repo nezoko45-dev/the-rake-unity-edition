@@ -227,10 +227,11 @@ let found=null;
 if(activeVibrations.length){
   activeVibrations.sort((a,b)=>(b.strength-(elapsed-b.time)*3)-(a.strength-(elapsed-a.time)*3));
   const pulse=activeVibrations[0];
-  found={target:pulse.source,cell:{x:pulse.x,z:pulse.z},d:distance(rake.pos,pulse.source.pos),cellD:distance(rake.pos,{x:pulse.x,z:pulse.z}),visible:hasLineOfSight(rake,pulse.source),vibration:true};
+  // Pursue the recorded vibration position, never the actor's live position.
+  found={target:null,cell:{x:pulse.x,z:pulse.z},d:Infinity,cellD:distance(rake.pos,{x:pulse.x,z:pulse.z}),visible:false,searching:true};
   rake.lastSeenCell={x:pulse.x,z:pulse.z};
   rake.searchTimer=2.2;
-  rake.searching=false;
+  rake.searching=true;
 }else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
   rake.searchTimer=Math.max(0,rake.searchTimer-dt);
   rake.searching=true;
@@ -238,35 +239,7 @@ if(activeVibrations.length){
 }else{
   rake.lastSeenCell=null;rake.searchTimer=0;rake.searching=false;
 }
-if(found){
-  rake.lastSeenCell={x:found.cell.x,z:found.cell.z};
-  rake.searchTimer=3;rake.searching=false;
-  rake.patrolCell=null;
-}else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
-  rake.searchTimer=Math.max(0,rake.searchTimer-dt);rake.searching=true;
-  found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true};
-}else if(validTargets.length){
-  rake.lastSeenCell=null;rake.searchTimer=0;
-  // A patrol destination is valid only while that exact grid cell remains
-  // occupied. As soon as it empties, choose another currently occupied cell.
-  const patrolKey=rake.patrolCell?.key;
-  const stillOccupied=patrolKey&&occupiedCells.has(patrolKey);
-  if(!stillOccupied){
-    const pool=validTargets.filter(v=>v.cellD>.8);
-    const choices=pool.length?pool:validTargets;
-    const next=choices[Math.floor(Math.random()*choices.length)];
-    rake.patrolCell={key:next.target.pos?Math.round(next.target.pos.x/HEAT_CELL)+','+Math.round(next.target.pos.z/HEAT_CELL):'',target:next.target};
-    rake.patrolCell.key=next.target?Math.round(next.target.pos.x/HEAT_CELL)+','+Math.round(next.target.pos.z/HEAT_CELL):'';
-  }
-  const key=rake.patrolCell?.key;
-  const occupied=validTargets.find(v=>v.target===rake.patrolCell?.target)||validTargets.find(v=>Math.round(v.cell.x/HEAT_CELL)+','+Math.round(v.cell.z/HEAT_CELL)===key);
-  if(occupied){
-    rake.searching=true;
-    found={target:null,cell:{x:occupied.cell.x,z:occupied.cell.z},d:Infinity,cellD:occupied.cellD,visible:false,searching:true};
-  }else{rake.patrolCell=null;rake.searching=false;found=null}
-}else{
-  rake.lastSeenCell=null;rake.searchTimer=0;rake.patrolCell=null;rake.searching=false;found=null;
-}
+
 if(found){
   if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
