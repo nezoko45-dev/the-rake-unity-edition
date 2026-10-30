@@ -263,7 +263,7 @@ if(activeVibrations.length){
 if(found){
   if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
-  const goal=found.target?found.target.pos:found.cell;
+  const goal=found.cell; // pursue the last recorded sound location; new footsteps update it
   if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){setRakePath(goal);rake.think=.8}
   else if(found.target&&distance(rake.pathGoal,goal)>5){setRakePath(goal);rake.think=.8}
   if(found.target){
