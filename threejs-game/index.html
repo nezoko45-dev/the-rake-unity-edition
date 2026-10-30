@@ -222,15 +222,35 @@ function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32
 function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(player.hp<=35&&player.alive){if(distance(a.pos,player.pos)>2.5){if(a.think<=0||!a.path?.length){setPath(a,player.pos);a.think=.5}movePath(a,3.5,dt);play(a,'walk')}else play(a,'idle');return}if(rake.alive&&d<24){a.path=[];a.pathGoal=null;if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{play(a,'idle')}}else{a.path=[];a.pathGoal=null;a.pathFailed=false;play(a,'idle')}}
 function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
 /* The Rake hunts only recent movement vibrations. Stationary actors are invisible to it. */
-const activeVibrations=vibrationEvents.filter(v=>elapsed-v.time<=1.0&&v.range>0&&v.strength>0&&v.source?.alive&&v.source.hp>=45&&distance(rake.pos,{x:v.x,z:v.z})<=v.range);
+// Discard expired, dead, weak-health, and out-of-range movement pulses.
+const activeVibrations=vibrationEvents.filter(v=>
+  elapsed-v.time<=.65&&v.range>0&&v.strength>0&&v.source?.alive&&
+  v.source.hp>=45&&distance(rake.pos,{x:v.x,z:v.z})<=v.range
+);
 let found=null;
 if(activeVibrations.length){
-  activeVibrations.sort((a,b)=>(b.strength-(elapsed-b.time)*3)-(a.strength-(elapsed-a.time)*3));
-  const pulse=activeVibrations[0];
-  // Pursue the recorded vibration position, never the actor's live position.
-  found={target:pulse.source,cell:{x:pulse.x,z:pulse.z},d:distance(rake.pos,pulse.source.pos),cellD:distance(rake.pos,{x:pulse.x,z:pulse.z}),visible:false,searching:false};
+  // Follow the newest actual movement, not the actor that happened to be
+  // selected first. If the current target is badly hurt, immediately prefer
+  // another living actor's newest vibration.
+  const currentTarget=rake.target;
+  const currentTargetCritical=!!currentTarget&&(!currentTarget.alive||currentTarget.hp<45);
+  activeVibrations.sort((a,b)=>b.time-a.time);
+  let pulse=null;
+  if(currentTargetCritical){
+    pulse=activeVibrations.find(v=>v.source!==currentTarget)||activeVibrations[0];
+  }else{
+    pulse=activeVibrations[0];
+    // Avoid switching targets for tiny timestamp differences when the
+    // existing target is still healthy and has also just moved.
+    const sameTarget=activeVibrations.find(v=>v.source===currentTarget);
+    if(sameTarget&&pulse.time-sameTarget.time<.12)pulse=sameTarget;
+  }
+  // A pulse is a sound location. Do not chase a stationary actor's live
+  // coordinates after the sound has faded.
+  const pulseCell={x:pulse.x,z:pulse.z};
+  found={target:pulse.source,cell:pulseCell,d:distance(rake.pos,pulseCell),cellD:distance(rake.pos,pulseCell),visible:false,searching:false};
   rake.lastSeenCell={x:pulse.x,z:pulse.z};
-  rake.searchTimer=.8;
+  rake.searchTimer=.65;
   rake.searching=true;
 }else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
   rake.searchTimer=Math.max(0,rake.searchTimer-dt);
