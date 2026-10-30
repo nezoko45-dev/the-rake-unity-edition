@@ -228,7 +228,7 @@ if(activeVibrations.length){
   activeVibrations.sort((a,b)=>(b.strength-(elapsed-b.time)*3)-(a.strength-(elapsed-a.time)*3));
   const pulse=activeVibrations[0];
   // Pursue the recorded vibration position, never the actor's live position.
-  found={target:null,cell:{x:pulse.x,z:pulse.z},d:Infinity,cellD:distance(rake.pos,{x:pulse.x,z:pulse.z}),visible:false,searching:true};
+  found={target:pulse.source,cell:{x:pulse.x,z:pulse.z},d:distance(rake.pos,pulse.source.pos),cellD:distance(rake.pos,{x:pulse.x,z:pulse.z}),visible:false,searching:false};
   rake.lastSeenCell={x:pulse.x,z:pulse.z};
   rake.searchTimer=.8;
   rake.searching=true;
