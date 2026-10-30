@@ -226,39 +226,64 @@ let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(player.hp<=35&&player.alive){a.wanderTarget=null;if(distance(a.pos,player.pos)>2.5){if(a.think<=0||!a.path?.length){setPath(a,player.pos);a.think=.5}movePath(a,3.5,dt);play(a,'walk')}else play(a,'idle');return}if(rake.alive&&d<24){a.wanderTarget=null;a.path=[];a.pathGoal=null;if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{play(a,'idle')}}else{if(!a.wanderTarget||a.think<=0||distance(a.pos,a.wanderTarget)<1.8||a.pathFailed){a.pathFailed=false;a.path=[];a.pathIndex=0;let target=null;for(let tries=0;tries<35;tries++){const angle=rand()*Math.PI*2;const radius=8+rand()*20;const x=a.pos.x+Math.cos(angle)*radius,z=a.pos.z+Math.sin(angle)*radius;if(walkablePoint(x,z)){target=new THREE.Vector3(x,0,z);break}}a.wanderTarget=target||a.pos.clone();a.think=4+rand()*7}const target=a.wanderTarget;if(target&&distance(a.pos,target)>1.8){const dx=target.x-a.pos.x,dz=target.z-a.pos.z,len=Math.hypot(dx,dz)||1;const step=Math.min(2.0*dt,len);const mx=dx/len*step,mz=dz/len*step;if(!blocked(a.pos.x+mx,a.pos.z+mz)){a.pos.x+=mx;a.pos.z+=mz}else if(!blocked(a.pos.x+mx,a.pos.z)){a.pos.x+=mx}else if(!blocked(a.pos.x,a.pos.z+mz)){a.pos.z+=mz}else{a.wanderTarget=null;a.think=0}a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;a.group.rotation.y=Math.atan2(dx,dz);play(a,'walk')}else play(a,'idle')}}
 function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
-/* The Rake hunts only recent movement vibrations. Stationary actors are invisible to it. */
-// Discard expired, dead, weak-health, and out-of-range movement pulses.
+/* The Rake hears movement within 45 units, commits to a living source,
+   then searches nearby walkable grid cells when the sound stops. */
 const RAKE_HEARING_RANGE=45;
 const activeVibrations=vibrationEvents.filter(v=>
-  elapsed-v.time<=.9&&v.range>0&&v.strength>0&&v.source?.alive&&
+  elapsed-v.time<=1.15&&v.range>0&&v.strength>0&&v.source?.alive&&
   distance(rake.pos,{x:v.x,z:v.z})<=RAKE_HEARING_RANGE
 );
 let found=null;
 if(activeVibrations.length){
-  // Choose among recent living sound sources inside the 45-unit hearing
-  // radius. Damage does not make a survivor or the player silent.
   const sources=[...new Set(activeVibrations.map(v=>v.source))];
-  const currentTarget=rake.target;
-  const targetPool=sources.length>1&&currentTarget?.alive
-    ?sources.filter(source=>source!==currentTarget)
-    :sources;
-  const chosenSource=targetPool[Math.floor(Math.random()*targetPool.length)]||sources[0];
-  const sourcePulses=activeVibrations.filter(v=>v.source===chosenSource);
-  sourcePulses.sort((a,b)=>b.time-a.time);
-  const pulse=sourcePulses[0]||activeVibrations[0];
-  // A pulse is a sound location. Do not chase a stationary actor's live
-  // coordinates after the sound has faded.
-  const pulseCell={x:pulse.x,z:pulse.z};
-  found={target:pulse.source,cell:pulseCell,d:distance(rake.pos,pulseCell),cellD:distance(rake.pos,pulseCell),visible:false,searching:false};
+  // Keep the current source while it is still making noise; only pick a
+  // different random source after the current one goes quiet.
+  const chosenSource=sources.includes(rake.target)
+    ?rake.target
+    :sources[Math.floor(Math.random()*sources.length)];
+  const pulse=activeVibrations.filter(v=>v.source===chosenSource)
+    .sort((a,b)=>b.time-a.time)[0];
+  const cell={x:pulse.x,z:pulse.z};
+  found={target:chosenSource,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:false,searching:false};
   rake.lastSeenCell={x:pulse.x,z:pulse.z};
-  rake.searchTimer=.65;
-  rake.searching=true;
+  rake.searchTimer=8;
+  rake.searching=false;
+  rake.searchVisited=[];
 }else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
   rake.searchTimer=Math.max(0,rake.searchTimer-dt);
   rake.searching=true;
-  found={target:null,cell:{x:rake.lastSeenCell.x,z:rake.lastSeenCell.z},d:Infinity,cellD:distance(rake.pos,rake.lastSeenCell),visible:false,searching:true};
+  // Pick another nearby walkable grid cell instead of idling at the last
+  // sound location. Cells are marked visited so the Rake fans out its search.
+  if(!rake.searchCell||distance(rake.pos,rake.searchCell)<1.6||
+     rake.searchCellUntil<=elapsed||rake.searchCellBlocked){
+    const visited=rake.searchVisited||(rake.searchVisited=[]);
+    const candidates=[];
+    for(let ring=1;ring<=5;ring++){
+      for(let gx=-ring;gx<=ring;gx++)for(let gz=-ring;gz<=ring;gz++){
+        if(Math.max(Math.abs(gx),Math.abs(gz))!==ring)continue;
+        const x=rake.lastSeenCell.x+gx*HEAT_CELL;
+        const z=rake.lastSeenCell.z+gz*HEAT_CELL;
+        const key=Math.round(x/HEAT_CELL)+','+Math.round(z/HEAT_CELL);
+        if(visited.includes(key)||blocked(x,z)||distance(rake.pos,{x,z})>RAKE_HEARING_RANGE)continue;
+        candidates.push({x,z,key});
+      }
+    }
+    if(candidates.length){
+      const next=candidates[Math.floor(Math.random()*Math.min(candidates.length,Math.max(4,Math.min(12,candidates.length))))];
+      rake.searchCell={x:next.x,z:next.z};
+      visited.push(next.key);
+      if(visited.length>36)visited.shift();
+      rake.searchCellUntil=elapsed+1.8;
+      rake.searchCellBlocked=false;
+    }else{
+      rake.searchTimer=0;
+    }
+  }
+  const cell=rake.searchCell||rake.lastSeenCell;
+  found={target:null,cell:{x:cell.x,z:cell.z},d:Infinity,cellD:distance(rake.pos,cell),visible:false,searching:true};
 }else{
   rake.lastSeenCell=null;rake.searchTimer=0;rake.searching=false;
+  rake.searchCell=null;rake.searchVisited=[];
 }
 
 if(found){
