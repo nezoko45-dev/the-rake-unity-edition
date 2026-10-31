@@ -225,7 +225,34 @@ function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}a.think-=dt;a.attack-=dt;const d=distance(a.pos,rake.pos);if(player.hp<=35&&player.alive){a.wanderTarget=null;if(distance(a.pos,player.pos)>2.5){if(a.think<=0||!a.path?.length){setPath(a,player.pos);a.think=.5}movePath(a,3.5,dt);play(a,'walk')}else play(a,'idle');return}if(rake.alive&&d<24){a.wanderTarget=null;a.path=[];a.pathGoal=null;if(d<2.8){if(a.attack<=0){damage(rake,8);a.attack=.8}play(a,'attack')}else{play(a,'idle')}}else{if(!a.wanderTarget||a.think<=0||distance(a.pos,a.wanderTarget)<1.8||a.pathFailed){a.pathFailed=false;a.path=[];a.pathIndex=0;let target=null;for(let tries=0;tries<35;tries++){const angle=rand()*Math.PI*2;const radius=8+rand()*20;const x=a.pos.x+Math.cos(angle)*radius,z=a.pos.z+Math.sin(angle)*radius;if(walkablePoint(x,z)){target=new THREE.Vector3(x,0,z);break}}a.wanderTarget=target||a.pos.clone();a.think=4+rand()*7}const target=a.wanderTarget;if(target&&distance(a.pos,target)>1.8){const dx=target.x-a.pos.x,dz=target.z-a.pos.z,len=Math.hypot(dx,dz)||1;const step=Math.min(2.0*dt,len);const mx=dx/len*step,mz=dz/len*step;if(!blocked(a.pos.x+mx,a.pos.z+mz)){a.pos.x+=mx;a.pos.z+=mz}else if(!blocked(a.pos.x+mx,a.pos.z)){a.pos.x+=mx}else if(!blocked(a.pos.x,a.pos.z+mz)){a.pos.z+=mz}else{a.wanderTarget=null;a.think=0}a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;a.group.rotation.y=Math.atan2(dx,dz);play(a,'walk')}else play(a,'idle')}}
-function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;if(!night){rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
+if(night){
+  // Make sure the monster actually enters the player's playable area at
+  // nightfall. A remote survivor kill should never leave it unseen all night.
+  rake.group.visible=true;
+  if(!rake.nightEntered){
+    rake.nightEntered=true;
+    if(distance(rake.pos,player.pos)>30){
+      let spawn=null;
+      for(let attempt=0;attempt<48;attempt++){
+        const angle=Math.random()*Math.PI*2;
+        const radius=19+Math.random()*7;
+        const x=player.pos.x+Math.cos(angle)*radius;
+        const z=player.pos.z+Math.sin(angle)*radius;
+        if(!blocked(x,z)){spawn={x,z};break}
+      }
+      if(spawn){
+        rake.pos.set(spawn.x,0,spawn.z);
+        rake.group.position.set(spawn.x,0,spawn.z);
+        rake.path=[];rake.pathGoal=null;rake.pathIndex=0;rake.pathFailed=false;
+        rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;
+      }
+    }
+  }
+}else{
+  rake.nightEntered=false;
+}
+if(!night){rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
 /* The Rake hears movement within 45 units, commits to a living source,
    then searches nearby walkable grid cells when the sound stops. */
 const RAKE_HEARING_RANGE=45;
@@ -287,7 +314,8 @@ if(activeVibrations.length){
   const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
   if(livingTargets.length){
     const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
-    const pool=nearest.slice(0,Math.min(3,nearest.length));
+    const playerTarget=livingTargets.includes(player)&&distance(rake.pos,player.pos)<=45?player:null;
+    const pool=playerTarget?[player]:nearest.slice(0,Math.min(3,nearest.length));
     const chosen=pool.includes(rake.target)?rake.target:pool[Math.floor(Math.random()*pool.length)];
     const cell={x:chosen.pos.x,z:chosen.pos.z};
     found={target:chosen,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:true,searching:false};
