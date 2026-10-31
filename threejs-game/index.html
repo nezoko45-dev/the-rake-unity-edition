@@ -330,6 +330,17 @@ if(activeVibrations.length){
   }
 }
 
+/* Player priority: survivor footsteps must never permanently steal the hunt.
+   If the player is alive and within 45 units, always pursue the player. */
+if(player.alive&&distance(rake.pos,player.pos)<=45){
+  const playerCell={x:player.pos.x,z:player.pos.z};
+  found={target:player,cell:playerCell,d:distance(rake.pos,playerCell),cellD:distance(rake.pos,playerCell),visible:true,searching:false};
+  rake.lastSeenCell=playerCell;
+  rake.searchTimer=8;
+  rake.searching=false;
+  rake.searchCell=null;
+  rake.searchVisited=[];
+}
 if(found){
   if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
