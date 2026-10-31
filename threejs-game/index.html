@@ -177,14 +177,27 @@ const rakeTurnHelper=new THREE.Object3D();
 function updateRakeMovementAnimation(){
   const movingSpeed=rake.actualMoveSpeed||0;
   if(movingSpeed<.05){play(rake,'idle');return}
-  // Prefer the embedded Run clip; fall back to Walk only if this GLB has no Run clip.
-  if(!play(rake,'run'))play(rake,'walk');
+  // Use a small hysteresis band so speed changes near the threshold do not
+  // rapidly swap clips. play() cross-fades between the embedded animations.
+  const currentName=rake.current?.getClip?.().name?.toLowerCase()||'';
+  const currentlyRunning=/run|running|sprint|chase|jog/.test(currentName);
+  const currentlyWalking=/walk|walking|stroll|locomotion/.test(currentName);
+  const runThreshold=currentlyRunning?5.2:6.2;
+  const useRun=movingSpeed>=runThreshold||(!currentlyWalking&&movingSpeed>=6.2);
+  const requested=useRun?'run':'walk';
+  if(!play(rake,requested)&&!play(rake,useRun?'walk':'run')){
+    play(rake,'idle');
+    return;
+  }
   const action=rake.current;
   if(action){
     action.enabled=true;
     action.paused=false;
     if(!action.isRunning()){action.reset();action.play()}
-    action.setEffectiveTimeScale(1);
+    const rate=useRun
+      ?THREE.MathUtils.clamp(movingSpeed/8,.75,1.35)
+      :THREE.MathUtils.clamp(movingSpeed/3.5,.65,1.15);
+    action.setEffectiveTimeScale(rate);
     action.setEffectiveWeight(1);
   }
 }
