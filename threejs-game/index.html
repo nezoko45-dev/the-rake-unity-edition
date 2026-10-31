@@ -282,18 +282,16 @@ if(activeVibrations.length){
   const cell=rake.searchCell||rake.lastSeenCell;
   found={target:null,cell:{x:cell.x,z:cell.z},d:Infinity,cellD:distance(rake.pos,cell),visible:false,searching:true};
 }else{
-  // If footsteps stop or the search timer expires, reacquire a living
-  // player/survivor directly. This prevents the Rake from becoming idle
-  // just because everyone stopped moving for a moment.
+  // Always keep hunting occupied actor cells. Hearing range controls sound
+  // detection, not whether the Rake is allowed to find a living target.
   const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
-  const inRange=livingTargets.filter(a=>distance(rake.pos,a.pos)<=RAKE_HEARING_RANGE);
-  if(inRange.length){
-    const chosen=inRange.includes(rake.target)
-      ?rake.target
-      :inRange[Math.floor(Math.random()*inRange.length)];
-    const liveCell={x:chosen.pos.x,z:chosen.pos.z};
-    found={target:chosen,cell:liveCell,d:distance(rake.pos,liveCell),cellD:distance(rake.pos,liveCell),visible:true,searching:false};
-    rake.lastSeenCell=liveCell;
+  if(livingTargets.length){
+    const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
+    const pool=nearest.slice(0,Math.min(3,nearest.length));
+    const chosen=pool.includes(rake.target)?rake.target:pool[Math.floor(Math.random()*pool.length)];
+    const cell={x:chosen.pos.x,z:chosen.pos.z};
+    found={target:chosen,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:true,searching:false};
+    rake.lastSeenCell=cell;
     rake.searchTimer=8;
     rake.searching=false;
     rake.searchCell=null;
