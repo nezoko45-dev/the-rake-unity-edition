@@ -174,7 +174,20 @@ function setRakePath(target){
   rake.pathFailed=!route||!route.length;rake.pathRetry=0;
 }
 const rakeTurnHelper=new THREE.Object3D();
-function updateRakeMovementAnimation(){const movingSpeed=rake.actualMoveSpeed||0;if(movingSpeed<.15){play(rake,'idle');return}play(rake,'run')}
+function updateRakeMovementAnimation(){
+  const movingSpeed=rake.actualMoveSpeed||0;
+  if(movingSpeed<.05){play(rake,'idle');return}
+  // Prefer the embedded Run clip; fall back to Walk only if this GLB has no Run clip.
+  if(!play(rake,'run'))play(rake,'walk');
+  const action=rake.current;
+  if(action){
+    action.enabled=true;
+    action.paused=false;
+    if(!action.isRunning()){action.reset();action.play()}
+    action.setEffectiveTimeScale(1);
+    action.setEffectiveWeight(1);
+  }
+}
 function moveRakeToward(goal,speed,dt){
   rake.actualMoveSpeed=0;
   const dx=goal.x-rake.pos.x,dz=goal.z-rake.pos.z,len=Math.hypot(dx,dz);
