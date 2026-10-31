@@ -177,13 +177,8 @@ const rakeTurnHelper=new THREE.Object3D();
 function updateRakeMovementAnimation(){
   const movingSpeed=rake.actualMoveSpeed||0;
   if(movingSpeed<.05){play(rake,'idle');return}
-  // Use a small hysteresis band so speed changes near the threshold do not
-  // rapidly swap clips. play() cross-fades between the embedded animations.
-  const currentName=rake.current?.getClip?.().name?.toLowerCase()||'';
-  const currentlyRunning=/run|running|sprint|chase|jog/.test(currentName);
-  const currentlyWalking=/walk|walking|stroll|locomotion/.test(currentName);
-  const runThreshold=currentlyRunning?5.2:6.2;
-  const useRun=movingSpeed>=runThreshold||(!currentlyWalking&&movingSpeed>=6.2);
+  // Walk below 8 speed; switch to Run at 8 and above.
+  const useRun=movingSpeed>=8;
   const requested=useRun?'run':'walk';
   if(!play(rake,requested)&&!play(rake,useRun?'walk':'run')){
     play(rake,'idle');
