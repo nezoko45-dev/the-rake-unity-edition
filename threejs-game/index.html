@@ -490,13 +490,39 @@ if(found){
   if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){setRakePath(goal);rake.think=.8}
   else if(found.target&&distance(rake.pathGoal,goal)>5){setRakePath(goal);rake.think=.8}
   if(found.target){
-    const playerDistance=distance(player.pos,rake.pos);
-    const toRake=new THREE.Vector3(rake.pos.x-player.pos.x,0,rake.pos.z-player.pos.z);
-    const viewDir=new THREE.Vector3();camera.getWorldDirection(viewDir);viewDir.y=0;viewDir.normalize();
-    const playerFacingRake=player.alive&&playerDistance<=8&&toRake.lengthSq()>0&&viewDir.dot(toRake.normalize())>.45;
+    const targetDistance=distance(found.target.pos,rake.pos);
+    const toRakeX=rake.pos.x-found.target.pos.x,toRakeZ=rake.pos.z-found.target.pos.z;
+    let targetFacingRake=false;
+    if(found.target.kind==='player'){
+      const viewDir=new THREE.Vector3();camera.getWorldDirection(viewDir);viewDir.y=0;viewDir.normalize();
+      const toRake=new THREE.Vector3(toRakeX,0,toRakeZ);
+      targetFacingRake=player.alive&&targetDistance<=8&&toRake.lengthSq()>0&&viewDir.dot(toRake.normalize())>.45;
+    }else{
+      const facingX=Math.sin(found.target.group.rotation.y),facingZ=Math.cos(found.target.group.rotation.y);
+      const facingLength=Math.hypot(toRakeX,toRakeZ)||1;
+      targetFacingRake=found.target.alive&&targetDistance<=8&&
+        (facingX*toRakeX+facingZ*toRakeZ)/facingLength>.45;
+    }
     const parryRoll=Math.random()<dt*.7;
-    if(playerFacingRake&&rake.parryCooldown<=0&&parryRoll){rake.parryTimer=1.15;rake.parryCooldown=3.5+Math.random()*2.5;rake.attack=1.15;rake.parryNotice=false;play(rake,'parry')}
-    if(rake.parryTimer>0){play(rake,'parry');return}
+    if(targetFacingRake&&rake.parryCooldown<=0&&parryRoll){
+      rake.parryTimer=1.15;rake.parryCooldown=3.5+Math.random()*2.5;
+      rake.attack=1.15;rake.parryNotice=false;rake.parryOrbitDirection=Math.random()<.5?-1:1;
+      rake.parryOrbitAngle=Math.atan2(rake.pos.z-found.target.pos.z,rake.pos.x-found.target.pos.x);
+      play(rake,'parry');
+    }
+    if(rake.parryTimer>0&&targetFacingRake){
+      // Keep facing the opponent while circling around them, like a VRChat player strafing in combat.
+      rake.parryOrbitAngle=(rake.parryOrbitAngle||0)+(rake.parryOrbitDirection||1)*dt*1.8;
+      const orbitGoal={x:found.target.pos.x+Math.cos(rake.parryOrbitAngle)*3.1,
+        z:found.target.pos.z+Math.sin(rake.parryOrbitAngle)*3.1};
+      moveRakeToward(orbitGoal,5.2,dt);
+      rake.group.rotation.y=Math.atan2(found.target.pos.x-rake.pos.x,found.target.pos.z-rake.pos.z);
+      play(rake,'parry');
+      return;
+    }else if(rake.parryTimer>0){
+      // Stop the parry immediately if the opponent turns away.
+      rake.parryTimer=0;
+    }
     if(found.d<2.5){
       if(rake.attack<=0){rakeDamageTarget(found.target,found.target.kind==='player'?30:24);rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack')}
       else{
