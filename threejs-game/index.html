@@ -375,7 +375,7 @@ if(!rake.bushAmbush){
     const candidates=bushes.filter(b=>!blocked(b.x,b.z)&&distance(rake.pos,b)>8);
     if(candidates.length){
       const bush=candidates[Math.floor(Math.random()*candidates.length)];
-      rake.bushAmbush={phase:'retreat',bush,victim,timer:20};
+      rake.bushAmbush={phase:'retreat',bush,victim,timer:6};
       rake.path=[];rake.pathGoal=null;rake.pathFailed=false;rake.think=0;rake.target=null;
       notify('Something moves in the bushes...');
     }
@@ -384,14 +384,16 @@ if(!rake.bushAmbush){
 if(rake.bushAmbush){
   const ambush=rake.bushAmbush;
   if(ambush.phase==='retreat'){
+    ambush.timer-=dt;
     if(!rake.pathGoal||distance(rake.pathGoal,ambush.bush)>1||!rake.path?.length||rake.pathFailed)setRakePath(ambush.bush);
-    if(distance(rake.pos,ambush.bush)>2.2){
+    if(distance(rake.pos,ambush.bush)>2.2&&ambush.timer>0){
       moveRakePath(19,dt);
       if(rake.actualMoveSpeed<.15)moveRakeToward(ambush.bush,19,dt);
       updateRakeMovementAnimation();
     }else{
+      // Never let a blocked path trap the Rake in retreat forever.
       ambush.phase='hide';ambush.timer=20;rake.actualMoveSpeed=0;rake.group.visible=false;
-      rake.path=[];rake.pathGoal=null;
+      rake.path=[];rake.pathGoal=null;rake.pathFailed=false;
       notify('The Rake has vanished into the bushes...');
     }
     floatRakeAboveGround(rake,dt);return;
