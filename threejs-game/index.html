@@ -250,6 +250,17 @@ function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){
+ if(!a?.group)return;
+ // Recover an ally whose logical position was cleared instead of letting its AI
+ // crash the entire animation/game loop while reading pos.x or pos.z.
+ if(!a.pos||!Number.isFinite(a.pos.x)||!Number.isFinite(a.pos.z)){
+  const p=a.group.position,spawn=a.spawn;
+  const x=Number.isFinite(p?.x)?p.x:(Number.isFinite(spawn?.x)?spawn.x:0);
+  const z=Number.isFinite(p?.z)?p.z:(Number.isFinite(spawn?.z)?spawn.z:0);
+  a.pos=new THREE.Vector3(x,0,z);
+  a.path=[];a.pathIndex=0;a.wanderTarget=null;a.pathFailed=false;
+ }
+ if(!rake?.pos||!Number.isFinite(rake.pos.x)||!Number.isFinite(rake.pos.z))return;
  if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}
  a.think-=dt;a.attack-=dt;
  const d=distance(a.pos,rake.pos),sight=night?22:34;
