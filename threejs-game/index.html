@@ -43,7 +43,8 @@ const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43)
 const obstacles=[],trees=[],treeMeshes=[];let seed=991;
 let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;
 let rakeKills=0,rakeSpeed=7;
-function recordRakeKill(){rakeKills++;rakeSpeed=1+Math.floor(Math.random()*19);if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s')+' — speed now '+rakeSpeed);console.info('Rake kill count:',rakeKills,'new speed:',rakeSpeed)}
+const RAKE_CLOSE_CHASE_RANGE=8;
+function recordRakeKill(){rakeKills++;if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s'));console.info('Rake kill count:',rakeKills)}
 function rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
 
 async function initializeRecast(){try{const [core,threeNav]=await Promise.all([import('https://cdn.jsdelivr.net/npm/@recast-navigation/core@0.35.0/dist/index.mjs'),import('https://cdn.jsdelivr.net/npm/@recast-navigation/three@0.35.0/dist/index.mjs')]);initRecast=core.init;NavMeshQuery=core.NavMeshQuery;threeToSoloNavMesh=threeNav.threeToSoloNavMesh;await initRecast();recastReady=true;console.info('Recast Navigation initialized');queueForestNavMeshBuild()}catch(err){recastReady=false;forestNavQuery=null;console.error('Optional Recast navigation failed; continuing with collision-aware fallback movement:',err);notify('Advanced navigation unavailable; forest is running in fallback mode.')}}
@@ -363,7 +364,7 @@ if(night){
 }else{
   rake.nightEntered=false;
 }
-if(!night){rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+if(!night){rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
 /* The Rake hears movement within 45 units, commits to a living source,
    then searches nearby walkable grid cells when the sound stops. */
 const RAKE_HEARING_RANGE=45;
@@ -453,6 +454,8 @@ if(activeVibrations.length){
 }
 
 if(found){
+  // Sprint at 19 when a living target is within 8 units; otherwise patrol at 7.
+  rakeSpeed=found.target&&distance(rake.pos,found.target.pos)<=RAKE_CLOSE_CHASE_RANGE?19:7;
   if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
   const goal=found.cell; // pursue the last recorded sound location; new footsteps update it
@@ -482,7 +485,7 @@ if(found){
       rake.attackAnimTimer=0;moveRakePath(rakeSpeed,dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);updateRakeMovementAnimation();
     }
   }else{
-    moveRakePath(Math.max(1,Math.min(19,rakeSpeed*.6)),dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,Math.max(1,Math.min(19,rakeSpeed*.6)),dt);if(found.searching&&rake.actualMoveSpeed<.15){if(!play(rake,'search'))play(rake,'idle')}else updateRakeMovementAnimation();rake.target=null;
+    rakeSpeed=7;moveRakePath(rakeSpeed,dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);if(found.searching&&rake.actualMoveSpeed<.15){if(!play(rake,'search'))play(rake,'idle')}else updateRakeMovementAnimation();rake.target=null;
   }
 }else{
   rake.target=null;rake.searching=false;rake.patrolGoal=null;rake.pathGoal=null;rake.path=[];play(rake,'idle');
