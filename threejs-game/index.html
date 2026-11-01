@@ -45,7 +45,6 @@ let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=fals
 let rakeKills=0,rakeSpeed=7;
 const RAKE_CLOSE_CHASE_RANGE=45;
 function recordRakeKill(){rakeKills++;if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;console.info('Rake kill count:',rakeKills)}
-function rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
 
 async function initializeRecast(){try{const [core,threeNav]=await Promise.all([import('https://cdn.jsdelivr.net/npm/@recast-navigation/core@0.35.0/dist/index.mjs'),import('https://cdn.jsdelivr.net/npm/@recast-navigation/three@0.35.0/dist/index.mjs')]);initRecast=core.init;NavMeshQuery=core.NavMeshQuery;threeToSoloNavMesh=threeNav.threeToSoloNavMesh;await initRecast();recastReady=true;console.info('Recast Navigation initialized');queueForestNavMeshBuild()}catch(err){recastReady=false;forestNavQuery=null;console.error('Optional Recast navigation failed; continuing with collision-aware fallback movement:',err);notify('Advanced navigation unavailable; forest is running in fallback mode.')}}
 function queueForestNavMeshBuild(){if(!recastReady||navBuildQueued)return;navBuildQueued=true;const version=++navBuildVersion;setTimeout(()=>{navBuildQueued=false;buildForestNavMesh(version)},180)}
@@ -259,8 +258,7 @@ function deathBroadcast(target){
 }
 function damage(target,n){
  if(!target.alive)return;
- if(target.isRake&&target.parryTimer>0){if(!target.parryNotice){notify('The Rake deflected the hit!');target.parryNotice=true}return;}
- target.hp-=n;
+  target.hp-=n;
  if(target.hp<=0){
   target.hp=0;target.alive=false;
   if(target.kind==='ally'){target.respawn=5;target.group.visible=false;notify(deathBroadcast(target),5000)}
@@ -272,7 +270,7 @@ function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const s
 function notify(t,duration=2300){const n=document.getElementById('notice');n.textContent=t;n.style.display='block';clearTimeout(notify.timer);notify.timer=setTimeout(()=>n.style.display='none',duration)}
 function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a.maxHp||65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||(a.isRake?RAKE_SPAWN:new THREE.Vector3(-43,0,-43)));a.group.position.copy(a.pos);a.path=[];a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
-function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
+function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);notify('You struck the Rake!')}}
 function updateAlly(a,dt){
  if(!a?.group)return;
  // Recover an ally whose logical position was cleared instead of letting its AI
@@ -361,7 +359,7 @@ function updateAlly(a,dt){
   a.group.rotation.y=Math.atan2(a.wanderTarget.x-a.pos.x,a.wanderTarget.z-a.pos.z);play(a,'walk');
  }else play(a,'idle');
 }
-function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.retreatTimer=Math.max(0,(rake.retreatTimer||0)-dt);rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
+function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
 if(night){
   // Make sure the monster actually enters the player's playable area at
   // nightfall. A remote survivor kill should never leave it unseen all night.
