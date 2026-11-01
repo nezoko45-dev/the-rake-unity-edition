@@ -380,9 +380,24 @@ if(activeVibrations.length){
   const patrolPool=survivorPulses.length?survivorPulses:activeVibrations;
   const weightedPool=patrolPool.filter(v=>elapsed-v.time<.85);
   const choices=weightedPool.length?weightedPool:patrolPool;
-  const pulse=choices[Math.floor(Math.random()*choices.length)];
-  const chosenSource=pulse.source;
-  const cell={x:pulse.x,z:pulse.z};
+  // Hold the current target for 11 seconds. Reconsider only after that
+  // interval and only if the current target has moved at least 1.25 units.
+  const currentTarget=rake.target?.alive?rake.target:null;
+  const targetMoved=!!(currentTarget&&rake.targetSwitchPos&&distance(currentTarget.pos,rake.targetSwitchPos)>1.25);
+  let chosenSource=currentTarget;
+  if(!currentTarget||((elapsed-(rake.targetSwitchAt||0))>=11&&targetMoved)){
+    const alternatives=choices.map(v=>v.source).filter(actor=>actor?.alive&&actor!==currentTarget);
+    if(alternatives.length)chosenSource=alternatives[Math.floor(Math.random()*alternatives.length)];
+    else if(!currentTarget)chosenSource=choices[Math.floor(Math.random()*choices.length)].source;
+    if(chosenSource&&chosenSource!==currentTarget){
+      rake.targetSwitchAt=elapsed;
+      rake.targetSwitchPos={x:chosenSource.pos.x,z:chosenSource.pos.z};
+    }
+  }
+  if(!chosenSource)chosenSource=choices[Math.floor(Math.random()*choices.length)].source;
+  const sourcePulses=choices.filter(v=>v.source===chosenSource).sort((a,b)=>b.time-a.time);
+  const pulse=sourcePulses[0]||{source:chosenSource,x:chosenSource.pos.x,z:chosenSource.pos.z,time:elapsed};
+  const cell={x:chosenSource.pos.x,z:chosenSource.pos.z};
   found={target:chosenSource,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:false,searching:false};
   rake.lastSeenCell={x:pulse.x,z:pulse.z};
   // A newly heard occupied cell interrupts the previous patrol route.
