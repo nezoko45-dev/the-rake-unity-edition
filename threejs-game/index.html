@@ -389,197 +389,52 @@ if(night){
   rake.nightEntered=false;
 }
 if(!night){rake.group.visible=true;rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
-/* The Rake hears movement within 45 units, commits to a living source,
-   then searches nearby walkable grid cells when the sound stops. */
+/* Basic night chase: movement sounds choose the target, and the Rake
+   immediately switches to another moving living actor. */
 const RAKE_HEARING_RANGE=45;
 const activeVibrations=vibrationEvents.filter(v=>
   elapsed-v.time<=1.15&&v.range>0&&v.strength>0&&v.source?.alive&&
   distance(rake.pos,{x:v.x,z:v.z})<=RAKE_HEARING_RANGE
 );
-let found=null;
+const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
+let target=null;
 if(activeVibrations.length){
-  // Treat player and survivor footsteps equally: either can become an immediate target.
-  // Every pulse represents a real occupied cell, so the Rake can hunt whoever is moving.
-  const patrolPool=activeVibrations;
-  const weightedPool=patrolPool.filter(v=>elapsed-v.time<.85);
-  const choices=weightedPool.length?weightedPool:patrolPool;
-  // Hold the current target for 11 seconds. Reconsider only after that
-  // interval and only if the current target has moved at least 1.25 units.
-  // Keep the current living target, but allow any active player or survivor pulse
-  // to become a target; never wait for the player or survivors to die first.
-  const currentTarget=rake.target?.alive?rake.target:null;
-  const targetMoved=!!(currentTarget&&rake.targetSwitchPos&&distance(currentTarget.pos,rake.targetSwitchPos)>1.25);
-  let chosenSource=currentTarget;
-  if(!currentTarget||((elapsed-(rake.targetSwitchAt||0))>=11&&targetMoved)){
-    const alternatives=choices.map(v=>v.source).filter(actor=>actor?.alive&&actor!==currentTarget);
-    if(alternatives.length)chosenSource=alternatives[Math.floor(Math.random()*alternatives.length)];
-    else if(!currentTarget)chosenSource=choices[Math.floor(Math.random()*choices.length)].source;
-    if(chosenSource&&chosenSource!==currentTarget){
-      rake.targetSwitchAt=elapsed;
-      rake.targetSwitchPos={x:chosenSource.pos.x,z:chosenSource.pos.z};
-    }
-  }
-  if(!chosenSource)chosenSource=choices[Math.floor(Math.random()*choices.length)].source;
-  const sourcePulses=choices.filter(v=>v.source===chosenSource).sort((a,b)=>b.time-a.time);
-  const pulse=sourcePulses[0]||{source:chosenSource,x:chosenSource.pos.x,z:chosenSource.pos.z,time:elapsed};
-  const cell={x:chosenSource.pos.x,z:chosenSource.pos.z};
-  found={target:chosenSource,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:false,searching:false};
-  rake.lastSeenCell={x:pulse.x,z:pulse.z};
-  // A newly heard occupied cell interrupts the previous patrol route.
-  if(!rake.lastHeardPulseTime||pulse.time>rake.lastHeardPulseTime){
-    rake.lastHeardPulseTime=pulse.time;
-    if(!rake.pathGoal||distance(rake.pathGoal,cell)>1.25||rake.pathFailed){
-      rake.path=[];rake.pathGoal=null;rake.pathIndex=0;rake.think=0;
-    }
-  }
-  rake.searchTimer=8;
-  rake.searching=false;
-  rake.searchVisited=[];
-}else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
-  rake.searchTimer=Math.max(0,rake.searchTimer-dt);
-  rake.searching=true;
-  // Randomly patrol previously occupied cells recorded from survivor/player movement.
-  // These are real actor positions from footsteps, not arbitrary empty forest cells.
-  if(!rake.searchCell||distance(rake.pos,rake.searchCell)<1.6||
-     rake.searchCellUntil<=elapsed||rake.searchCellBlocked){
-    const visited=rake.searchVisited||(rake.searchVisited=[]);
-    const occupiedCells=vibrationEvents
-      .filter(v=>v.source?.alive&&
-        (v.source.kind==='ally'||v.source.kind==='player')&&
-        elapsed-v.time<=35&&!blocked(v.x,v.z))
-      .map(v=>({x:v.x,z:v.z,key:Math.round(v.x/HEAT_CELL)+','+Math.round(v.z/HEAT_CELL)}))
-      .filter(cell=>!visited.includes(cell.key));
-    if(occupiedCells.length){
-      const next=occupiedCells[Math.floor(Math.random()*occupiedCells.length)];
-      rake.searchCell={x:next.x,z:next.z};
-      visited.push(next.key);
-      if(visited.length>36)visited.shift();
-      rake.searchCellUntil=elapsed+8;
-      rake.searchCellBlocked=false;
-    }else if(rake.lastSeenCell&&!blocked(rake.lastSeenCell.x,rake.lastSeenCell.z)){
-      rake.searchCell={x:rake.lastSeenCell.x,z:rake.lastSeenCell.z};
-      rake.searchCellUntil=elapsed+3;
-    }else{
-      rake.searchTimer=0;
-    }
-  }
-  const cell=rake.searchCell||rake.lastSeenCell;
-  found={target:null,cell:{x:cell.x,z:cell.z},d:Infinity,cellD:distance(rake.pos,cell),visible:false,searching:true};
-}else{
-  // Always keep hunting occupied actor cells. Hearing range controls sound
-  // detection, not whether the Rake is allowed to find a living target.
-  const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
-  if(livingTargets.length){
-    // Player and survivors are all valid targets from the start.
-    // Choose the nearest living actor rather than waiting for one group to die.
-    const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
-    // Keep one target instead of rolling a new random target every frame.
-    // Switch only after 11 seconds and only if the locked target has moved.
-    const currentTarget=rake.target?.alive?rake.target:null;
-    const targetMoved=!!(currentTarget&&rake.targetSwitchPos&&distance(currentTarget.pos,rake.targetSwitchPos)>1.25);
-    let chosen=currentTarget||nearest[0];
-    if(!currentTarget||((elapsed-(rake.targetSwitchAt||0))>=11&&targetMoved)){
-      const alternatives=nearest.filter(actor=>actor!==currentTarget);
-      if(alternatives.length)chosen=alternatives[0];
-      if(chosen!==currentTarget){
-        rake.targetSwitchAt=elapsed;
-        rake.targetSwitchPos={x:chosen.pos.x,z:chosen.pos.z};
-      }
-    }
-    if(!rake.targetSwitchPos){
-      rake.targetSwitchAt=elapsed;
-      rake.targetSwitchPos={x:chosen.pos.x,z:chosen.pos.z};
-    }
-    const cell={x:chosen.pos.x,z:chosen.pos.z};
-    found={target:chosen,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:true,searching:false};
-    rake.lastSeenCell=cell;
-    rake.searchTimer=8;
-    rake.searching=false;
-    rake.searchCell=null;
-    rake.searchVisited=[];
-  }else{
-    rake.lastSeenCell=null;rake.searchTimer=0;rake.searching=false;
-    rake.searchCell=null;rake.searchVisited=[];
-  }
+  // The newest movement from any living actor wins, so a moving survivor
+  // can pull the Rake away from its current target immediately.
+  activeVibrations.sort((a,b)=>b.time-a.time);
+  target=activeVibrations[0].source;
 }
-
-if(found){
-  // Sprint at 19 when a living target is within 45 units; otherwise patrol at 7.
-  rakeSpeed=found.target&&distance(rake.pos,found.target.pos)<=RAKE_CLOSE_CHASE_RANGE?19:7;
-  if(found.target){rake.patrolCell=null}
-  if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
-  const goal=found.cell; // pursue the last recorded sound location; new footsteps update it
-  if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed){setRakePath(goal);rake.think=.8}
-  else if(found.target&&distance(rake.pathGoal,goal)>5){setRakePath(goal);rake.think=.8}
-  if(found.target){
-    const targetDistance=distance(found.target.pos,rake.pos);
-    const toRakeX=rake.pos.x-found.target.pos.x,toRakeZ=rake.pos.z-found.target.pos.z;
-    let targetFacingRake=false;
-    if(found.target.kind==='player'){
-      const viewDir=new THREE.Vector3();camera.getWorldDirection(viewDir);viewDir.y=0;viewDir.normalize();
-      const toRake=new THREE.Vector3(toRakeX,0,toRakeZ);
-      targetFacingRake=player.alive&&targetDistance<=8&&toRake.lengthSq()>0&&viewDir.dot(toRake.normalize())>.45;
-    }else{
-      const facingX=Math.sin(found.target.group.rotation.y),facingZ=Math.cos(found.target.group.rotation.y);
-      const facingLength=Math.hypot(toRakeX,toRakeZ)||1;
-      targetFacingRake=found.target.alive&&targetDistance<=8&&
-        (facingX*toRakeX+facingZ*toRakeZ)/facingLength>.45;
-    }
-    const parryRoll=Math.random()<dt*.7;
-    if(targetFacingRake&&rake.parryCooldown<=0&&parryRoll){
-      rake.parryTimer=1.15;rake.parryCooldown=3.5+Math.random()*2.5;
-      rake.attack=1.15;rake.parryNotice=false;rake.parryOrbitDirection=Math.random()<.5?-1:1;
-      rake.parryOrbitAngle=Math.atan2(rake.pos.z-found.target.pos.z,rake.pos.x-found.target.pos.x);
-      play(rake,'parry');
-    }
-    if(rake.parryTimer>0&&targetFacingRake){
-      // Keep facing the opponent while circling around them, like a VRChat player strafing in combat.
-      rake.parryOrbitAngle=(rake.parryOrbitAngle||0)+(rake.parryOrbitDirection||1)*dt*1.8;
-      const orbitGoal={x:found.target.pos.x+Math.cos(rake.parryOrbitAngle)*3.1,
-        z:found.target.pos.z+Math.sin(rake.parryOrbitAngle)*3.1};
-      moveRakeToward(orbitGoal,5.2,dt);
-      rake.group.rotation.y=Math.atan2(found.target.pos.x-rake.pos.x,found.target.pos.z-rake.pos.z);
-      play(rake,'parry');
-      return;
-    }else if(rake.parryTimer>0){
-      // Stop the parry immediately if the opponent turns away.
-      rake.parryTimer=0;
-    }
-    if(rake.retreatTimer>0){
-      // After striking, retreat for five seconds to create a false sense of safety.
-      if(rake.retreatGoal){
-        moveRakeToward(rake.retreatGoal,7,dt);
-        rake.group.rotation.y=Math.atan2(found.target.pos.x-rake.pos.x,found.target.pos.z-rake.pos.z);
-        if(rake.actualMoveSpeed<.15)play(rake,'idle');else updateRakeMovementAnimation();
-      }else play(rake,'idle');
-    }else if(found.d<2.5){
-      if(rake.attack<=0){
-        rakeDamageTarget(found.target,found.target.kind==='player'?30:24);
-        rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack');
-        const awayX=rake.pos.x-found.target.pos.x,awayZ=rake.pos.z-found.target.pos.z;
-        const awayLength=Math.hypot(awayX,awayZ)||1;
-        rake.retreatGoal={x:rake.pos.x+awayX/awayLength*9,z:rake.pos.z+awayZ/awayLength*9};
-        rake.retreatTimer=5;
-      }
-      else{
-        // Keep pressure on a moving survivor during the attack cooldown.
-        // Only hold position when already close enough to complete the attack.
-        if(found.d>1.6){
-          moveRakeToward(goal,Math.max(1.2,rakeSpeed*.45),dt);
-          updateRakeMovementAnimation();
-          if(rake.attackAnimTimer>0)play(rake,'attack');
-        }else if(rake.attackAnimTimer>0)play(rake,'attack');
-        else play(rake,'idle');
-      }
-    }else{
-      rake.attackAnimTimer=0;moveRakePath(rakeSpeed,dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);updateRakeMovementAnimation();
-    }
+if(!target&&livingTargets.length){
+  // With no recent movement sounds, keep chasing the nearest living actor.
+  target=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos))[0];
+}
+if(target){
+  if(rake.target!==target){
+    rake.target=target;
+    rake.path=[];rake.pathGoal=null;rake.pathIndex=0;
+    rake.pathFailed=false;rake.think=0;
+  }
+  rake.searching=false;rake.lastSeenCell={x:target.pos.x,z:target.pos.z};
+  rakeSpeed=distance(rake.pos,target.pos)<=RAKE_CLOSE_CHASE_RANGE?19:7;
+  const goal={x:target.pos.x,z:target.pos.z};
+  if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed||
+     distance(rake.pathGoal,goal)>2){
+    setRakePath(goal);rake.think=.35;
+  }
+  if(distance(rake.pos,target.pos)>2.2){
+    moveRakePath(rakeSpeed,dt);
+    if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);
+    updateRakeMovementAnimation();
   }else{
-    rakeSpeed=7;moveRakePath(rakeSpeed,dt);if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);if(found.searching&&rake.actualMoveSpeed<.15){if(!play(rake,'search'))play(rake,'idle')}else updateRakeMovementAnimation();rake.target=null;
+    rake.path=[];rake.pathGoal=null;
+    rake.group.rotation.y=Math.atan2(target.pos.x-rake.pos.x,target.pos.z-rake.pos.z);
+    play(rake,'idle');
   }
 }else{
-  rake.target=null;rake.searching=false;rake.patrolGoal=null;rake.pathGoal=null;rake.path=[];play(rake,'idle');
-}floatRakeAboveGround(rake,dt)}
+  rake.target=null;rake.searching=false;rake.lastSeenCell=null;
+  rake.pathGoal=null;rake.path=[];play(rake,'idle');
+}
+floatRakeAboveGround(rake,dt)}
 function updateDayNight(){const t=elapsed%DAY_LENGTH;const isNight=t>=DAY_LENGTH*.25;if(isNight!==night){night=isNight;notify(night?'NIGHT FALLS — THE RAKE IS HUNTING':'DAYBREAK — THE RAKE IS RETREATING');}const k=night?1:0;scene.background.lerpColors(new THREE.Color(0x91a9b3),new THREE.Color(0x000000),k);scene.fog.color.copy(scene.background);scene.fog.near=night?2:48;scene.fog.far=night?24:150;sun.intensity=night?0:2.2;ambientLight.intensity=night?0.015:2.6;ambientLight.color.set(night?0x020309:0xd8e7f0);ambientLight.groundColor.set(night?0x000000:0x3d4932);fire.intensity=night?2:5;flashlight.intensity=flashlightOn?95:0}
 const hud=document.getElementById('stats');function tick(){requestAnimationFrame(tick);const dt=Math.min(clock.getDelta(),.05);if(window.__gameStartedRequested&&!gameStarted){gameStarted=true;document.getElementById('overlay').style.display='none';try{controls.lock()}catch(err){console.error('Pointer lock failed:',err);notify('Mouse lock unavailable — use WASD; click the game to retry mouse look')}}if(gameStarted){elapsed+=dt;updateDayNight();updateMusic(night);updateForestChunks();player.attack=Math.max(0,player.attack-dt);if(playerAttackHeld&&player.attack<=0)strikeRake();if(!player.alive){player.respawn-=dt;if(player.respawn<=0)respawnPlayer()}const move=new THREE.Vector3();if(keys.KeyW)move.z-=1;if(keys.KeyS)move.z+=1;if(keys.KeyA)move.x-=1;if(keys.KeyD)move.x+=1;if(move.lengthSq()){move.normalize();const speed=keys.ShiftLeft||keys.ShiftRight?9:5.5;const forward=new THREE.Vector3();camera.getWorldDirection(forward);forward.y=0;forward.normalize();const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();const delta=forward.multiplyScalar(-move.z).add(right.multiplyScalar(move.x)).multiplyScalar(speed*dt);const p=controls.getObject().position;const x=p.x+delta.x,z=p.z+delta.z;if(!blocked(x,z)){p.x=x;p.z=z}}player.pos=controls.getObject().position;dtVibration=dt;updateActorVibration(player,keys.ShiftLeft||keys.ShiftRight?55:move.lengthSq()?45:0,keys.ShiftLeft||keys.ShiftRight?.18:.32);allies.forEach(a=>updateAlly(a,dt));for(const a of allies)updateActorVibration(a,45,.3);updateRake(dt);for(const m of mixers)m.update(dt);updateRakeHeadTracking();floatRakeAboveGround(rake,dt);hud.innerHTML=('Health: '+player.hp)+(player.alive?'':' (RESPAWNING)')+'<br>Survivors: '+allies.filter(a=>a.alive).length+' / '+allies.length+'<br>Rake: '+(!rake.alive?'down (respawning)':night?'hunting — '+rakeSpeed+' speed':'retreating — '+rakeSpeed+' speed')+'<br>Rake kills: '+rakeKills+'<br>Time: '+(night?'NIGHT':'DAY');document.getElementById('playerHealthFill').style.width=Math.max(0,player.hp)+'%';document.getElementById('playerHealthFill').style.background=player.hp<=35?'#e34c4c':'#64d68a';updateHealthBar(player);allies.forEach(updateHealthBar);if(player.hp<=0)controls.unlock()}renderer.render(scene,camera)}tick();
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
