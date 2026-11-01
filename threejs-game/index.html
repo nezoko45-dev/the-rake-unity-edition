@@ -359,20 +359,25 @@ const activeVibrations=vibrationEvents.filter(v=>
 );
 let found=null;
 if(activeVibrations.length){
-  const sources=[...new Set(activeVibrations.map(v=>v.source))];
-  // Every living actor's footsteps compete for the Rake's attention.
-  // Pick among the freshest active footstep sources instead of permanently
-  // favoring the current target.
-  const freshestTime=Math.max(...activeVibrations.map(v=>v.time));
-  const freshestSources=[...new Set(activeVibrations
-    .filter(v=>freshestTime-v.time<.08)
-    .map(v=>v.source))];
-  const chosenSource=freshestSources[Math.floor(Math.random()*freshestSources.length)];
-  const pulse=activeVibrations.filter(v=>v.source===chosenSource)
-    .sort((a,b)=>b.time-a.time)[0];
+  // Each movement pulse records an occupied survivor cell. Randomly select
+  // from recent survivor footsteps so the Rake patrols between moving survivors
+  // instead of always following the loudest or nearest one.
+  const survivorPulses=activeVibrations.filter(v=>v.source?.kind==='ally');
+  const patrolPool=survivorPulses.length?survivorPulses:activeVibrations;
+  const weightedPool=patrolPool.filter(v=>elapsed-v.time<.85);
+  const choices=weightedPool.length?weightedPool:patrolPool;
+  const pulse=choices[Math.floor(Math.random()*choices.length)];
+  const chosenSource=pulse.source;
   const cell={x:pulse.x,z:pulse.z};
   found={target:chosenSource,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:false,searching:false};
   rake.lastSeenCell={x:pulse.x,z:pulse.z};
+  // A newly heard occupied cell interrupts the previous patrol route.
+  if(!rake.lastHeardPulseTime||pulse.time>rake.lastHeardPulseTime){
+    rake.lastHeardPulseTime=pulse.time;
+    if(!rake.pathGoal||distance(rake.pathGoal,cell)>1.25||rake.pathFailed){
+      rake.path=[];rake.pathGoal=null;rake.pathIndex=0;rake.think=0;
+    }
+  }
   rake.searchTimer=8;
   rake.searching=false;
   rake.searchVisited=[];
