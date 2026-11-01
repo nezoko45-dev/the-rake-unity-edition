@@ -382,7 +382,9 @@ if(activeVibrations.length){
   const choices=weightedPool.length?weightedPool:patrolPool;
   // Hold the current target for 11 seconds. Reconsider only after that
   // interval and only if the current target has moved at least 1.25 units.
-  const currentTarget=rake.target?.alive?rake.target:null;
+  // If survivors are making noise, prioritize hunting them over the player.
+  const currentTarget=rake.target?.alive&&
+    (rake.target.kind==='ally'||!survivorPulses.length)?rake.target:null;
   const targetMoved=!!(currentTarget&&rake.targetSwitchPos&&distance(currentTarget.pos,rake.targetSwitchPos)>1.25);
   let chosenSource=currentTarget;
   if(!currentTarget||((elapsed-(rake.targetSwitchAt||0))>=11&&targetMoved)){
@@ -447,7 +449,10 @@ if(activeVibrations.length){
   // detection, not whether the Rake is allowed to find a living target.
   const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
   if(livingTargets.length){
-    const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
+    // Prefer living survivors whenever any remain; the player is a fallback target.
+    const survivorTargets=allies.filter(actor=>actor.alive);
+    const huntingTargets=survivorTargets.length?survivorTargets:livingTargets;
+    const nearest=[...huntingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
     // Keep one target instead of rolling a new random target every frame.
     // Switch only after 11 seconds and only if the locked target has moved.
     const currentTarget=rake.target?.alive?rake.target:null;
