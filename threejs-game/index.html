@@ -415,28 +415,27 @@ if(activeVibrations.length){
 }else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
   rake.searchTimer=Math.max(0,rake.searchTimer-dt);
   rake.searching=true;
-  // Pick another nearby walkable grid cell instead of idling at the last
-  // sound location. Cells are marked visited so the Rake fans out its search.
+  // Choose a completely random walkable grid cell anywhere in the forest.
+  // Keep each destination long enough for the Rake to travel toward it.
   if(!rake.searchCell||distance(rake.pos,rake.searchCell)<1.6||
      rake.searchCellUntil<=elapsed||rake.searchCellBlocked){
     const visited=rake.searchVisited||(rake.searchVisited=[]);
-    const candidates=[];
-    for(let ring=1;ring<=5;ring++){
-      for(let gx=-ring;gx<=ring;gx++)for(let gz=-ring;gz<=ring;gz++){
-        if(Math.max(Math.abs(gx),Math.abs(gz))!==ring)continue;
-        const x=rake.lastSeenCell.x+gx*HEAT_CELL;
-        const z=rake.lastSeenCell.z+gz*HEAT_CELL;
-        const key=Math.round(x/HEAT_CELL)+','+Math.round(z/HEAT_CELL);
-        if(visited.includes(key)||blocked(x,z)||distance(rake.pos,{x,z})>RAKE_HEARING_RANGE)continue;
-        candidates.push({x,z,key});
-      }
+    let next=null;
+    for(let attempt=0;attempt<160;attempt++){
+      const gx=Math.floor(Math.random()*121)-60;
+      const gz=Math.floor(Math.random()*121)-60;
+      const x=gx*HEAT_CELL;
+      const z=gz*HEAT_CELL;
+      const key=gx+','+gz;
+      if(visited.includes(key)||blocked(x,z))continue;
+      next={x,z,key};
+      break;
     }
-    if(candidates.length){
-      const next=candidates[Math.floor(Math.random()*Math.min(candidates.length,Math.max(4,Math.min(12,candidates.length))))];
+    if(next){
       rake.searchCell={x:next.x,z:next.z};
       visited.push(next.key);
       if(visited.length>36)visited.shift();
-      rake.searchCellUntil=elapsed+1.8;
+      rake.searchCellUntil=elapsed+12;
       rake.searchCellBlocked=false;
     }else{
       rake.searchTimer=0;
