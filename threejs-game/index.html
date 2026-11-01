@@ -359,7 +359,7 @@ function updateAlly(a,dt){
   a.group.rotation.y=Math.atan2(a.wanderTarget.x-a.pos.x,a.wanderTarget.z-a.pos.z);play(a,'walk');
  }else play(a,'idle');
 }
-function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
+function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack=Math.max(0,(rake.attack||0)-dt);const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
 if(night){
   // Make sure the monster actually enters the player's playable area at
   // nightfall. A remote survivor kill should never leave it unseen all night.
@@ -419,14 +419,23 @@ if(target){
      distance(rake.pathGoal,goal)>2){
     setRakePath(goal);rake.think=.35;
   }
-  if(distance(rake.pos,target.pos)>2.2){
+  const targetDistance=distance(rake.pos,target.pos);
+  if(targetDistance>2.2){
     moveRakePath(rakeSpeed,dt);
     if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);
     updateRakeMovementAnimation();
   }else{
     rake.path=[];rake.pathGoal=null;
     rake.group.rotation.y=Math.atan2(target.pos.x-rake.pos.x,target.pos.z-rake.pos.z);
-    play(rake,'idle');
+    if(rake.attack<=0){
+      const wasAlive=target.alive;
+      damage(target,target.kind==='player'?30:24);
+      if(wasAlive&&!target.alive)recordRakeKill();
+      rake.attack=3;
+      play(rake,'attack');
+    }else{
+      play(rake,'idle');
+    }
   }
 }else{
   rake.target=null;rake.searching=false;rake.lastSeenCell=null;
