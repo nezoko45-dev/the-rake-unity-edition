@@ -55,7 +55,7 @@ const FOREST_CHUNK=40,FOREST_RADIUS=2,forestChunks=new Map();let lastForestAncho
 const navFloorGeometry=new THREE.PlaneGeometry(FOREST_CHUNK*5,FOREST_CHUNK*5);
 function chunkRandFactory(cx,cz){let state=(Math.imul(cx+8191,73856093)^Math.imul(cz+8191,19349663)^991)>>>0;return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296}}
 function buildForestChunk(cx,cz){const key=cx+','+cz;if(forestChunks.has(key))return;const rr=chunkRandFactory(cx,cz),meshes=[],chunkTrees=[];for(let i=0;i<30;i++){const x=cx*FOREST_CHUNK+rr()*FOREST_CHUNK,z=cz*FOREST_CHUNK+rr()*FOREST_CHUNK;if(Math.hypot(x,z)<9||Math.hypot(x+43,z+43)<7)continue;const h=3+rr()*7,r=.35+rr()*.55;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(r*.65,r,h,7),mat(0x40352a));trunk.position.set(x,h/2,z);trunk.castShadow=false;scene.add(trunk);meshes.push(trunk);const crown=new THREE.Mesh(new THREE.ConeGeometry(1.7+rr()*1.4,4+rr()*4,7),mat(rr()>.5?0x1c3428:0x263d2c));crown.position.set(x,h+1.4,z);crown.castShadow=false;scene.add(crown);meshes.push(crown);chunkTrees.push({x,z,r:r+1.0});}forestChunks.set(key,{meshes,trees:chunkTrees,cx,cz});}
-function updateForestChunks(){const anchors=[player?.pos,rake?.pos,...allies.filter(a=>a.alive).map(a=>a.pos)].filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z));if(!anchors.length)return;const anchorKey=anchors.map(p=>Math.floor(p.x/FOREST_CHUNK)+','+Math.floor(p.z/FOREST_CHUNK)).join('|');if(anchorKey===lastForestAnchor)return;lastForestAnchor=anchorKey;const wanted=new Set();for(const p of anchors){const cx=Math.floor(p.x/FOREST_CHUNK),cz=Math.floor(p.z/FOREST_CHUNK);for(let dx=-FOREST_RADIUS;dx<=FOREST_RADIUS;dx++)for(let dz=-FOREST_RADIUS;dz<=FOREST_RADIUS;dz++){const x=cx+dx,z=cz+dz,key=x+','+z;wanted.add(key);buildForestChunk(x,z)}}for(const [key,c] of forestChunks){if(!wanted.has(key)){for(const m of c.meshes){scene.remove(m);m.geometry.dispose();if(m.material&&m.material.dispose)m.material.dispose()}forestChunks.delete(key)}}obstacles.length=0;trees.length=0;treeMeshes.length=0;for(const c of forestChunks.values()){obstacles.push(...c.trees.map(o=>({x:o.x,z:o.z,r:o.r+0.1})));trees.push(...c.trees);treeMeshes.push(...c.meshes)}queueForestNavMeshBuild();for(const a of allies){if(a.alive&&a.pos&&Number.isFinite(a.pos.x)&&Number.isFinite(a.pos.z)&&blocked(a.pos.x,a.pos.z)){const safe=randomAISpawn();a.pos.copy(safe);a.spawn.copy(safe);a.group.position.copy(safe);a.path=[];a.pathGoal=null;a.think=0}}}
+function updateForestChunks(){const anchors=[player?.pos,rake?.pos,...allies.filter(a=>a.alive).map(a=>a.pos)].filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z));if(!anchors.length)return;const anchorKey=anchors.map(p=>Math.floor(p.x/FOREST_CHUNK)+','+Math.floor(p.z/FOREST_CHUNK)).join('|');if(anchorKey===lastForestAnchor)return;lastForestAnchor=anchorKey;const wanted=new Set();for(const p of anchors){const cx=Math.floor(p.x/FOREST_CHUNK),cz=Math.floor(p.z/FOREST_CHUNK);for(let dx=-FOREST_RADIUS;dx<=FOREST_RADIUS;dx++)for(let dz=-FOREST_RADIUS;dz<=FOREST_RADIUS;dz++){const x=cx+dx,z=cz+dz,key=x+','+z;wanted.add(key);buildForestChunk(x,z)}}for(const [key,c] of forestChunks){if(!wanted.has(key)){for(const m of c.meshes){scene.remove(m);m.geometry.dispose();if(m.material&&m.material.dispose)m.material.dispose()}forestChunks.delete(key)}}obstacles.length=0;trees.length=0;treeMeshes.length=0;for(const c of forestChunks.values()){obstacles.push(...c.trees.map(o=>({x:o.x,z:o.z,r:o.r+0.1})));trees.push(...c.trees);treeMeshes.push(...c.meshes)}queueForestNavMeshBuild();for(const a of allies){if(a.alive&&a.pos&&Number.isFinite(a.pos.x)&&Number.isFinite(a.pos.z)&&blocked(a.pos.x,a.pos.z)){const safe=randomAISpawn();a.pos.copy(safe);if(!a.spawn||typeof a.spawn.copy!=='function')a.spawn=safe.clone();else a.spawn.copy(safe);a.group.position.copy(safe);a.path=[];a.pathGoal=null;a.think=0}}}
 
 const camp=new THREE.Group();for(let i=0;i<4;i++){const b=new THREE.Mesh(new THREE.CylinderGeometry(.08,.13,1.7,6),mat(0x5c4631));b.position.set(Math.cos(i*Math.PI/2)*1.4,.85,Math.sin(i*Math.PI/2)*1.4);b.rotation.z=(i%2?-.7:.7);camp.add(b)}const fire=new THREE.PointLight(0xff7c26,8,16);fire.position.set(0,1,0);camp.add(fire);scene.add(camp);camp.position.set(-43,0,-43);
 const loader=new GLTFLoader();let rakeTemplate=null,animations=[];const mixers=[];
@@ -202,6 +202,7 @@ function updateRakeMovementAnimation(){
 }
 function moveRakeToward(goal,speed,dt){
   rake.actualMoveSpeed=0;
+  if(!rake?.pos||!rake?.group||!goal||![rake.pos.x,rake.pos.z,goal.x,goal.z].every(Number.isFinite))return;
   const dx=goal.x-rake.pos.x,dz=goal.z-rake.pos.z,len=Math.hypot(dx,dz);
   if(len<.12)return;
   const step=Math.min(speed*dt,len),base=Math.atan2(dz,dx);
@@ -217,6 +218,7 @@ function moveRakeToward(goal,speed,dt){
 }
 function moveRakePath(speed,dt){
   rake.actualMoveSpeed=0;
+  if(!rake?.pos||!rake?.group||!Number.isFinite(rake.pos.x)||!Number.isFinite(rake.pos.z)){rake.path=[];rake.pathIndex=0;rake.pathFailed=true;return}
   if(!rake.path?.length||rake.pathIndex>=rake.path.length)return;
   let node=rake.path[rake.pathIndex];
   while(node&&distance(rake.pos,node)<.65){rake.pathIndex++;node=rake.path[rake.pathIndex]}
@@ -244,10 +246,10 @@ function movePath(actor,speed,dt){
   actor.pos.x=nx;actor.pos.z=nz;actor.group.position.x=nx;actor.group.position.z=nz;
   actor.group.rotation.y=Math.atan2(dx,dz);
 }
-function damage(target,n){if(!target.alive)return;if(target.isRake&&target.parryTimer>0){if(!target.parryNotice){notify('The Rake deflected the hit!');target.parryNotice=true}return;}target.hp-=n;if(target.hp<=0){target.hp=0;target.alive=false;if(target.kind==='ally'){target.respawn=5;target.group.visible=false;notify('A survivor is down — backup in 5 seconds')}else if(target.kind==='player'){target.respawn=4;controls.unlock();notify('You were killed — respawning in 4 seconds...')}else{target.respawn=12;target.group.visible=false;notify('The Rake is down... for now.')}}}
+function damage(target,n){if(!target?.alive||!Number.isFinite(n))return;if(target.isRake&&target.parryTimer>0){if(!target.parryNotice){notify('The Rake deflected the hit!');target.parryNotice=true}return;}target.hp-=n;if(target.hp<=0){target.hp=0;target.alive=false;if(target.kind==='ally'){target.respawn=5;target.group.visible=false;notify('A survivor is down — backup in 5 seconds')}else if(target.kind==='player'){target.respawn=4;controls.unlock();notify('You were killed — respawning in 4 seconds...')}else{target.respawn=12;target.group.visible=false;notify('The Rake is down... for now.')}}}
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,2.05,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;controls.getObject().updateMatrixWorld(true);notify('You have respawned!');}
 function notify(t){const n=document.getElementById('notice');n.textContent=t;n.style.display='block';clearTimeout(notify.timer);notify.timer=setTimeout(()=>n.style.display='none',2300)}
-function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a.maxHp||65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||(a.isRake?RAKE_SPAWN:new THREE.Vector3(-43,0,-43)));a.group.position.copy(a.pos);a.path=[];a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
+function respawn(a){if(!a)return;if(!a.group)a.group=new THREE.Group();if(!a.spawn||!Number.isFinite(a.spawn.x)||!Number.isFinite(a.spawn.z))a.spawn=a.isRake?RAKE_SPAWN.clone():new THREE.Vector3(-43,0,-43);if(!a.pos||typeof a.pos.copy!=='function')a.pos=new THREE.Vector3();a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a.maxHp||65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||(a.isRake?RAKE_SPAWN:new THREE.Vector3(-43,0,-43)));a.group.position.copy(a.pos);a.path=[];a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){
@@ -433,7 +435,7 @@ if(activeVibrations.length){
 }else{
   // Always keep hunting occupied actor cells. Hearing range controls sound
   // detection, not whether the Rake is allowed to find a living target.
-  const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
+  const livingTargets=[...(player.alive&&player.pos&&Number.isFinite(player.pos.x)&&Number.isFinite(player.pos.z)?[player]:[]),...allies.filter(a=>a.alive&&a.pos&&Number.isFinite(a.pos.x)&&Number.isFinite(a.pos.z))];
   if(livingTargets.length){
     const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
     // If nobody is making a fresh sound, choose randomly among nearby living
