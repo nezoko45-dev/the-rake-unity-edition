@@ -369,7 +369,7 @@ if(!night){rake.bushAmbush=null;rake.bushAmbushCooldown=0;rake.group.visible=tru
 if(rake.bushAmbushCooldown>0)rake.bushAmbushCooldown=Math.max(0,rake.bushAmbushCooldown-dt);
 if(!rake.bushAmbush){
   const nearbyActors=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
-  const triggerActors=player.alive?[player]:nearbyActors.filter(actor=>bushes.some(b=>distance(actor.pos,b)<=3.8));
+  const triggerActors=nearbyActors.filter(actor=>bushes.some(b=>distance(actor.pos,b)<=3.8));
   if(triggerActors.length&&rake.bushAmbushCooldown<=0&&bushes.length){
     const victim=triggerActors.includes(player)?player:triggerActors[Math.floor(Math.random()*triggerActors.length)];
     const candidates=bushes.filter(b=>!blocked(b.x,b.z)&&distance(rake.pos,b)>8);
@@ -402,7 +402,7 @@ if(rake.bushAmbush){
       const living=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
       if(!ambush.victim?.alive)ambush.victim=living.sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos))[0];
       if(!ambush.victim){rake.bushAmbush=null;rake.bushAmbushCooldown=30;rake.group.visible=true}
-      else{ambush.phase='lunge';ambush.timer=7;rake.group.visible=true;rake.path=[];rake.pathGoal=null;rake.think=0;notify('THE RAKE LUNGES FROM COVER!')}
+      else{ambush.phase='lunge';ambush.timer=15;ambush.pathRefresh=0;rake.group.visible=true;rake.path=[];rake.pathGoal=null;rake.think=0;notify('THE RAKE LUNGES FROM COVER!')}
     }
     if(rake.bushAmbush){floatRakeAboveGround(rake,dt);return}
   }
@@ -410,14 +410,14 @@ if(rake.bushAmbush){
     const victim=ambush.victim;
     if(!victim?.alive){rake.bushAmbush=null;rake.bushAmbushCooldown=30}
     else{
-      ambush.timer-=dt;
+      ambush.timer-=dt;ambush.pathRefresh=(ambush.pathRefresh||0)-dt;
       if(ambush.timer<=0){rake.bushAmbush=null;rake.bushAmbushCooldown=30}
       else{
-        if(!rake.pathGoal||distance(rake.pathGoal,victim.pos)>2||!rake.path?.length||rake.pathFailed)setRakePath(victim.pos);
+        if(ambush.pathRefresh<=0||!rake.path?.length||rake.pathFailed||!rake.pathGoal||distance(rake.pathGoal,victim.pos)>2){setRakePath(victim.pos);ambush.pathRefresh=.35}
         moveRakePath(30,dt);
         if(rake.actualMoveSpeed<.15)moveRakeToward(victim.pos,30,dt);
         updateRakeMovementAnimation();play(rake,'attack');
-        if(distance(rake.pos,victim.pos)<3.1){
+        if(distance(rake.pos,victim.pos)<4.2){
           rakeDamageTarget(victim,victim.kind==='player'?90:80);
           rake.attack=3;rake.attackAnimTimer=2.5;rake.bushAmbush=null;rake.bushAmbushCooldown=35;
           notify('The Rake strikes from the bushes!');
