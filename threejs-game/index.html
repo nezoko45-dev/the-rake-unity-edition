@@ -43,7 +43,7 @@ const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43)
 const obstacles=[],trees=[],treeMeshes=[];let seed=991;
 let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;
 let rakeKills=0,rakeSpeed=7;
-const RAKE_CLOSE_CHASE_RANGE=8;
+const RAKE_CLOSE_CHASE_RANGE=45;
 function recordRakeKill(){rakeKills++;if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;notify('The Rake has '+rakeKills+' kill'+(rakeKills===1?'':'s'));console.info('Rake kill count:',rakeKills)}
 function rakeDamageTarget(target,amount){const wasAlive=target.alive;damage(target,amount);if(wasAlive&&!target.alive)recordRakeKill()}
 
@@ -454,7 +454,7 @@ if(activeVibrations.length){
 }
 
 if(found){
-  // Sprint at 19 when a living target is within 8 units; otherwise patrol at 7.
+  // Sprint at 19 when a living target is within 45 units; otherwise patrol at 7.
   rakeSpeed=found.target&&distance(rake.pos,found.target.pos)<=RAKE_CLOSE_CHASE_RANGE?19:7;
   if(found.target){rake.patrolCell=null}
   if(found.target&&rake.target!==found.target){rake.target=found.target;rake.pathGoal=null;rake.path=[];rake.pathFailed=false;rake.think=0}
