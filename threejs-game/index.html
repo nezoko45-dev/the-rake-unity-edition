@@ -40,7 +40,7 @@ const ambientLight=new THREE.HemisphereLight(0xd8e7f0,0x3d4932,2.6);scene.add(am
 const sun=new THREE.DirectionalLight(0xffe0ad,2.2);sun.position.set(-35,60,20);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);scene.add(sun);
 const mat=(c,r=.95)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;ground.position.y=-.035;scene.add(ground);
-const obstacles=[],trees=[],treeMeshes=[];let seed=991;
+const obstacles=[],trees=[],treeMeshes=[],bushes=[];let seed=991;
 let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;
 let rakeKills=0,rakeSpeed=7;
 const RAKE_CLOSE_CHASE_RANGE=45;
@@ -54,8 +54,8 @@ function findNavPath(start,goal){if(!forestNavQuery||!start||!goal||![start.x,st
 const FOREST_CHUNK=40,FOREST_RADIUS=2,forestChunks=new Map();let lastForestAnchor='';
 const navFloorGeometry=new THREE.PlaneGeometry(FOREST_CHUNK*5,FOREST_CHUNK*5);
 function chunkRandFactory(cx,cz){let state=(Math.imul(cx+8191,73856093)^Math.imul(cz+8191,19349663)^991)>>>0;return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296}}
-function buildForestChunk(cx,cz){const key=cx+','+cz;if(forestChunks.has(key))return;const rr=chunkRandFactory(cx,cz),meshes=[],chunkTrees=[];for(let i=0;i<30;i++){const x=cx*FOREST_CHUNK+rr()*FOREST_CHUNK,z=cz*FOREST_CHUNK+rr()*FOREST_CHUNK;if(Math.hypot(x,z)<9||Math.hypot(x+43,z+43)<7)continue;const h=3+rr()*7,r=.35+rr()*.55;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(r*.65,r,h,7),mat(0x40352a));trunk.position.set(x,h/2,z);trunk.castShadow=false;scene.add(trunk);meshes.push(trunk);const crown=new THREE.Mesh(new THREE.ConeGeometry(1.7+rr()*1.4,4+rr()*4,7),mat(rr()>.5?0x1c3428:0x263d2c));crown.position.set(x,h+1.4,z);crown.castShadow=false;scene.add(crown);meshes.push(crown);chunkTrees.push({x,z,r:r+1.0});}forestChunks.set(key,{meshes,trees:chunkTrees,cx,cz});}
-function updateForestChunks(){const anchors=[player?.pos,rake?.pos,...allies.filter(a=>a.alive).map(a=>a.pos)].filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z));if(!anchors.length)return;const anchorKey=anchors.map(p=>Math.floor(p.x/FOREST_CHUNK)+','+Math.floor(p.z/FOREST_CHUNK)).join('|');if(anchorKey===lastForestAnchor)return;lastForestAnchor=anchorKey;const wanted=new Set();for(const p of anchors){const cx=Math.floor(p.x/FOREST_CHUNK),cz=Math.floor(p.z/FOREST_CHUNK);for(let dx=-FOREST_RADIUS;dx<=FOREST_RADIUS;dx++)for(let dz=-FOREST_RADIUS;dz<=FOREST_RADIUS;dz++){const x=cx+dx,z=cz+dz,key=x+','+z;wanted.add(key);buildForestChunk(x,z)}}for(const [key,c] of forestChunks){if(!wanted.has(key)){for(const m of c.meshes){scene.remove(m);m.geometry.dispose();if(m.material&&m.material.dispose)m.material.dispose()}forestChunks.delete(key)}}obstacles.length=0;trees.length=0;treeMeshes.length=0;for(const c of forestChunks.values()){obstacles.push(...c.trees.map(o=>({x:o.x,z:o.z,r:o.r+0.1})));trees.push(...c.trees);treeMeshes.push(...c.meshes)}queueForestNavMeshBuild();for(const a of allies){if(a.alive&&blocked(a.pos.x,a.pos.z)){const safe=randomAISpawn();a.pos.copy(safe);a.spawn.copy(safe);a.group.position.copy(safe);a.path=[];a.pathGoal=null;a.think=0}}}
+function buildForestChunk(cx,cz){const key=cx+','+cz;if(forestChunks.has(key))return;const rr=chunkRandFactory(cx,cz),meshes=[],chunkTrees=[],chunkBushes=[];for(let i=0;i<30;i++){const x=cx*FOREST_CHUNK+rr()*FOREST_CHUNK,z=cz*FOREST_CHUNK+rr()*FOREST_CHUNK;if(Math.hypot(x,z)<9||Math.hypot(x+43,z+43)<7)continue;const h=3+rr()*7,r=.35+rr()*.55;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(r*.65,r,h,7),mat(0x40352a));trunk.position.set(x,h/2,z);trunk.castShadow=false;scene.add(trunk);meshes.push(trunk);const crown=new THREE.Mesh(new THREE.ConeGeometry(1.7+rr()*1.4,4+rr()*4,7),mat(rr()>.5?0x1c3428:0x263d2c));crown.position.set(x,h+1.4,z);crown.castShadow=false;scene.add(crown);meshes.push(crown);chunkTrees.push({x,z,r:r+1.0});}for(let i=0;i<7;i++){const x=cx*FOREST_CHUNK+3+rr()*(FOREST_CHUNK-6),z=cz*FOREST_CHUNK+3+rr()*(FOREST_CHUNK-6);if(Math.hypot(x,z)<12||Math.hypot(x+43,z+43)<10||chunkTrees.some(t=>Math.hypot(t.x-x,t.z-z)<3))continue;const shrub=new THREE.Mesh(new THREE.IcosahedronGeometry(1.25+rr()*.65,1),new THREE.MeshStandardMaterial({color:[0x263d25,0x304b2b,0x40552e,0x243629][Math.floor(rr()*4)],roughness:1}));shrub.position.set(x,.72,z);shrub.scale.set(1.35,.8,1.05);shrub.castShadow=true;shrub.receiveShadow=true;scene.add(shrub);meshes.push(shrub);chunkBushes.push({x,z});}forestChunks.set(key,{meshes,trees:chunkTrees,bushes:chunkBushes,cx,cz});}
+function updateForestChunks(){const anchors=[player?.pos,rake?.pos,...allies.filter(a=>a.alive).map(a=>a.pos)].filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z));if(!anchors.length)return;const anchorKey=anchors.map(p=>Math.floor(p.x/FOREST_CHUNK)+','+Math.floor(p.z/FOREST_CHUNK)).join('|');if(anchorKey===lastForestAnchor)return;lastForestAnchor=anchorKey;const wanted=new Set();for(const p of anchors){const cx=Math.floor(p.x/FOREST_CHUNK),cz=Math.floor(p.z/FOREST_CHUNK);for(let dx=-FOREST_RADIUS;dx<=FOREST_RADIUS;dx++)for(let dz=-FOREST_RADIUS;dz<=FOREST_RADIUS;dz++){const x=cx+dx,z=cz+dz,key=x+','+z;wanted.add(key);buildForestChunk(x,z)}}for(const [key,c] of forestChunks){if(!wanted.has(key)){for(const m of c.meshes){scene.remove(m);m.geometry.dispose();if(m.material&&m.material.dispose)m.material.dispose()}forestChunks.delete(key)}}obstacles.length=0;trees.length=0;treeMeshes.length=0;bushes.length=0;for(const c of forestChunks.values()){obstacles.push(...c.trees.map(o=>({x:o.x,z:o.z,r:o.r+0.1})));trees.push(...c.trees);bushes.push(...(c.bushes||[]));treeMeshes.push(...c.meshes)}queueForestNavMeshBuild();for(const a of allies){if(a.alive&&blocked(a.pos.x,a.pos.z)){const safe=randomAISpawn();a.pos.copy(safe);a.spawn.copy(safe);a.group.position.copy(safe);a.path=[];a.pathGoal=null;a.think=0}}}
 
 const camp=new THREE.Group();for(let i=0;i<4;i++){const b=new THREE.Mesh(new THREE.CylinderGeometry(.08,.13,1.7,6),mat(0x5c4631));b.position.set(Math.cos(i*Math.PI/2)*1.4,.85,Math.sin(i*Math.PI/2)*1.4);b.rotation.z=(i%2?-.7:.7);camp.add(b)}const fire=new THREE.PointLight(0xff7c26,8,16);fire.position.set(0,1,0);camp.add(fire);scene.add(camp);camp.position.set(-43,0,-43);
 const loader=new GLTFLoader();let rakeTemplate=null,animations=[];const mixers=[];
@@ -364,7 +364,69 @@ if(night){
 }else{
   rake.nightEntered=false;
 }
-if(!night){rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+if(!night){rake.bushAmbush=null;rake.bushAmbushCooldown=0;rake.group.visible=true;rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+/* Bush-triggered ambush: retreat to cover, hide for 20 seconds, then lunge. */
+if(rake.bushAmbushCooldown>0)rake.bushAmbushCooldown=Math.max(0,rake.bushAmbushCooldown-dt);
+if(!rake.bushAmbush){
+  const nearbyActors=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
+  const triggerActors=nearbyActors.filter(actor=>bushes.some(b=>distance(actor.pos,b)<=3.8));
+  if(triggerActors.length&&rake.bushAmbushCooldown<=0&&bushes.length){
+    const victim=triggerActors[Math.floor(Math.random()*triggerActors.length)];
+    const candidates=bushes.filter(b=>!blocked(b.x,b.z)&&distance(rake.pos,b)>8);
+    if(candidates.length){
+      const bush=candidates[Math.floor(Math.random()*candidates.length)];
+      rake.bushAmbush={phase:'retreat',bush,victim,timer:20};
+      rake.path=[];rake.pathGoal=null;rake.pathFailed=false;rake.think=0;rake.target=null;
+      notify('Something moves in the bushes...');
+    }
+  }
+}
+if(rake.bushAmbush){
+  const ambush=rake.bushAmbush;
+  if(ambush.phase==='retreat'){
+    if(!rake.pathGoal||distance(rake.pathGoal,ambush.bush)>1||!rake.path?.length||rake.pathFailed)setRakePath(ambush.bush);
+    if(distance(rake.pos,ambush.bush)>2.2){
+      moveRakePath(19,dt);
+      if(rake.actualMoveSpeed<.15)moveRakeToward(ambush.bush,19,dt);
+      updateRakeMovementAnimation();
+    }else{
+      ambush.phase='hide';ambush.timer=20;rake.actualMoveSpeed=0;rake.group.visible=false;
+      rake.path=[];rake.pathGoal=null;
+      notify('The Rake has vanished into the bushes...');
+    }
+    floatRakeAboveGround(rake,dt);return;
+  }
+  if(ambush.phase==='hide'){
+    rake.group.visible=false;ambush.timer-=dt;rake.actualMoveSpeed=0;
+    if(ambush.timer<=0){
+      const living=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
+      if(!ambush.victim?.alive)ambush.victim=living.sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos))[0];
+      if(!ambush.victim){rake.bushAmbush=null;rake.bushAmbushCooldown=30;rake.group.visible=true}
+      else{ambush.phase='lunge';ambush.timer=7;rake.group.visible=true;rake.path=[];rake.pathGoal=null;rake.think=0;notify('THE RAKE LUNGES FROM COVER!')}
+    }
+    if(rake.bushAmbush){floatRakeAboveGround(rake,dt);return}
+  }
+  if(ambush.phase==='lunge'){
+    const victim=ambush.victim;
+    if(!victim?.alive){rake.bushAmbush=null;rake.bushAmbushCooldown=30}
+    else{
+      ambush.timer-=dt;
+      if(ambush.timer<=0){rake.bushAmbush=null;rake.bushAmbushCooldown=30}
+      else{
+        if(!rake.pathGoal||distance(rake.pathGoal,victim.pos)>2||!rake.path?.length||rake.pathFailed)setRakePath(victim.pos);
+        moveRakePath(30,dt);
+        if(rake.actualMoveSpeed<.15)moveRakeToward(victim.pos,30,dt);
+        updateRakeMovementAnimation();play(rake,'attack');
+        if(distance(rake.pos,victim.pos)<3.1){
+          rakeDamageTarget(victim,victim.kind==='player'?90:80);
+          rake.attack=3;rake.attackAnimTimer=2.5;rake.bushAmbush=null;rake.bushAmbushCooldown=35;
+          notify('The Rake strikes from the bushes!');
+        }
+        floatRakeAboveGround(rake,dt);return;
+      }
+    }
+  }
+}
 /* The Rake hears movement within 45 units, commits to a living source,
    then searches nearby walkable grid cells when the sound stops. */
 const RAKE_HEARING_RANGE=45;
