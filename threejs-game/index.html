@@ -371,7 +371,7 @@ if(!rake.bushAmbush){
   const nearbyActors=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
   const triggerActors=nearbyActors.filter(actor=>bushes.some(b=>distance(actor.pos,b)<=3.8));
   if(triggerActors.length&&rake.bushAmbushCooldown<=0&&bushes.length){
-    const victim=triggerActors[Math.floor(Math.random()*triggerActors.length)];
+    const victim=triggerActors.includes(player)?player:triggerActors[Math.floor(Math.random()*triggerActors.length)];
     const candidates=bushes.filter(b=>!blocked(b.x,b.z)&&distance(rake.pos,b)>8);
     if(candidates.length){
       const bush=candidates[Math.floor(Math.random()*candidates.length)];
