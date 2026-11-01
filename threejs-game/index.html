@@ -246,77 +246,81 @@ function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);if(rake.parryTimer<=0)notify('You struck the Rake!')}}
 function updateAlly(a,dt){
-  if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}
-  a.think-=dt;a.attack-=dt;
-  const d=distance(a.pos,rake.pos);
-  if(player.hp<=35&&player.alive){
-    a.wanderTarget=null;
-    if(distance(a.pos,player.pos)>2.5){
-      if(a.think<=0||!a.path?.length){setPath(a,player.pos);a.think=.5}
-      movePath(a,3.5,dt);
-      if(a.path?.length)play(a,'walk');else play(a,'run');
-    }else play(a,'idle');
-    return;
+ if(!a.alive){a.respawn-=dt;if(a.respawn<=0)respawn(a);return}
+ a.think-=dt;a.attack-=dt;
+ const d=distance(a.pos,rake.pos),sight=night?22:34;
+ const sees=rake.alive&&d<sight&&hasLineOfSight(a,rake);
+ const moved=a.lastRakePos?Math.hypot(rake.pos.x-a.lastRakePos.x,rake.pos.z-a.lastRakePos.z)>.16:false;
+ a.lastRakePos={x:rake.pos.x,z:rake.pos.z};
+ if(sees||(rake.alive&&d<38&&moved)){
+  a.alertedUntil=elapsed+(sees?9:6);a.lastKnownRake={x:rake.pos.x,z:rake.pos.z};
+  for(const other of allies)if(other!==a&&other.alive&&distance(other.pos,a.pos)<28){
+   other.alertedUntil=Math.max(other.alertedUntil||0,elapsed+5);
+   other.lastKnownRake={x:rake.pos.x,z:rake.pos.z};
   }
-  if(rake.alive&&d<(night?5.5:24)){
-    // Survivors should never stand still just because the Rake is nearby:
-    // retreat while there is room, and circle/dodge if it gets into striking range.
-    a.wanderTarget=null;a.path=[];a.pathGoal=null;a.pathFailed=false;
-    const dx=a.pos.x-rake.pos.x,dz=a.pos.z-rake.pos.z;
-    const len=Math.hypot(dx,dz)||.001;
-    const awayX=dx/len,awayZ=dz/len;
-    const side=a.dodgeSide||1;
-    const close=d<2.8;
-    if(close&&a.attack<=0){damage(rake,8);a.attack=.8}
-    const retreatSpeed=close?1.35:3.2;
-    const sideMix=close?.9:.28;
-    const vx=awayX+(-awayZ)*side*sideMix;
-    const vz=awayZ+awayX*side*sideMix;
-    const vl=Math.hypot(vx,vz)||1;
-    const step=retreatSpeed*dt;
-    const candidates=[
-      [vx/vl*step,vz/vl*step],
-      [-awayZ*side*step,awayX*side*step],
-      [awayX*step,awayZ*step],
-      [-awayZ*side*step*.6,awayX*side*step*.6]
-    ];
-    let moved=false;
-    for(const [mx,mz] of candidates){
-      if(!blocked(a.pos.x+mx,a.pos.z+mz)){
-        a.pos.x+=mx;a.pos.z+=mz;
-        moved=true;break;
-      }
-    }
-    if(!moved){a.dodgeSide=-side; a.think=0}
-    else{
-      a.dodgeSide=side;
-      a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;
-      a.group.rotation.y=Math.atan2(-dx,-dz);
-    }
-    play(a,close?'attack':'run');
-    return;
-  }
-  if(!a.wanderTarget||a.think<=0||distance(a.pos,a.wanderTarget)<1.8||a.pathFailed){
-    a.pathFailed=false;a.path=[];a.pathIndex=0;
-    let target=null;
-    for(let tries=0;tries<35;tries++){
-      const angle=rand()*Math.PI*2,radius=8+rand()*20;
-      const x=a.pos.x+Math.cos(angle)*radius,z=a.pos.z+Math.sin(angle)*radius;
-      if(walkablePoint(x,z)){target=new THREE.Vector3(x,0,z);break}
-    }
-    a.wanderTarget=target||a.pos.clone();a.think=4+rand()*7;
-  }
-  const target=a.wanderTarget;
-  if(target&&distance(a.pos,target)>1.8){
-    const dx=target.x-a.pos.x,dz=target.z-a.pos.z,len=Math.hypot(dx,dz)||1;
-    const step=Math.min(2.0*dt,len),mx=dx/len*step,mz=dz/len*step;
-    if(!blocked(a.pos.x+mx,a.pos.z+mz)){a.pos.x+=mx;a.pos.z+=mz}
-    else if(!blocked(a.pos.x+mx,a.pos.z)){a.pos.x+=mx}
-    else if(!blocked(a.pos.x,a.pos.z+mz)){a.pos.z+=mz}
-    else{a.wanderTarget=null;a.think=0}
-    a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;
-    a.group.rotation.y=Math.atan2(dx,dz);play(a,'walk');
+ }
+ const alerted=(a.alertedUntil||0)>elapsed;
+ const threat=alerted&&a.lastKnownRake?a.lastKnownRake:(rake.alive&&d<(night?5.5:24)?{x:rake.pos.x,z:rake.pos.z}:null);
+ if(player.hp<=35&&player.alive&&(!rake.alive||d>8)){
+  a.wanderTarget=null;
+  if(distance(a.pos,player.pos)>2.5){
+   if(a.think<=0||!a.path?.length||distance(a.pathGoal||a.pos,player.pos)>4){setPath(a,player.pos);a.think=.55}
+   if(a.path?.length)movePath(a,3.8,dt);
+   else clearMove(a,(player.pos.x-a.pos.x)*dt,(player.pos.z-a.pos.z)*dt);
+   play(a,'run');
   }else play(a,'idle');
+  return;
+ }
+ if(threat){
+  a.wanderTarget=null;
+  const dx=a.pos.x-threat.x,dz=a.pos.z-threat.z,len=Math.hypot(dx,dz)||.001,close=d<3.2;
+  if(rake.alive&&d<2.8&&a.attack<=0){damage(rake,8);a.attack=.8}
+  if(a.think<=0||!a.path?.length||a.pathFailed){
+   const side=a.dodgeSide||1,angle=Math.atan2(dz,dx);
+   const choices=[.72,-.72,1.15,-1.15].map(offset=>({x:a.pos.x+Math.cos(angle+offset)*15,z:a.pos.z+Math.sin(angle+offset)*15}));
+   const goal=choices.find(p=>!blocked(p.x,p.z));
+   if(goal)setPath(a,goal);
+   a.think=.75;
+   if(!goal||a.pathFailed)a.dodgeSide=-side;
+  }
+  if(a.path?.length)movePath(a,close?2.2:4.2,dt);
+  else{
+   const side=a.dodgeSide||1,angle=Math.atan2(dz,dx)+side*.65,step=(close?2.1:3.5)*dt;
+   const mx=Math.cos(angle)*step,mz=Math.sin(angle)*step;
+   if(!blocked(a.pos.x+mx,a.pos.z+mz)){a.pos.x+=mx;a.pos.z+=mz}
+   else{a.dodgeSide=-side;a.think=0}
+   a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;
+  }
+  a.group.rotation.y=Math.atan2(-dx,-dz);play(a,close?'attack':'run');return;
+ }
+ if(alerted&&a.lastKnownRake){
+  if(a.think<=0||!a.path?.length||a.pathFailed){
+   const angle=rand()*Math.PI*2,radius=3+rand()*9;
+   const goal={x:a.lastKnownRake.x+Math.cos(angle)*radius,z:a.lastKnownRake.z+Math.sin(angle)*radius};
+   if(!blocked(goal.x,goal.z))setPath(a,goal);
+   a.think=1.2;
+  }
+  if(a.path?.length){movePath(a,2.8,dt);play(a,'walk');return}
+ }
+ if(!a.wanderTarget||a.think<=0||distance(a.pos,a.wanderTarget)<1.8||a.pathFailed){
+  a.pathFailed=false;a.path=[];a.pathIndex=0;
+  let target=null;
+  for(let tries=0;tries<45;tries++){
+   const angle=rand()*Math.PI*2,radius=9+rand()*24,x=a.pos.x+Math.cos(angle)*radius,z=a.pos.z+Math.sin(angle)*radius;
+   if(walkablePoint(x,z)){target=new THREE.Vector3(x,0,z);break}
+  }
+  a.wanderTarget=target||a.pos.clone();if(target)setPath(a,target);a.think=4+rand()*6;
+ }
+ if(a.wanderTarget&&distance(a.pos,a.wanderTarget)>1.8){
+  if(a.path?.length)movePath(a,2.3,dt);
+  else{
+   const dx=a.wanderTarget.x-a.pos.x,dz=a.wanderTarget.z-a.pos.z,len=Math.hypot(dx,dz)||1,step=Math.min(2.3*dt,len),mx=dx/len*step,mz=dz/len*step;
+   if(!blocked(a.pos.x+mx,a.pos.z+mz)){a.pos.x+=mx;a.pos.z+=mz}
+   else{a.wanderTarget=null;a.think=0}
+   a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;
+  }
+  a.group.rotation.y=Math.atan2(a.wanderTarget.x-a.pos.x,a.wanderTarget.z-a.pos.z);play(a,'walk');
+ }else play(a,'idle');
 }
 function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
 if(night){
