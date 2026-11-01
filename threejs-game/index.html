@@ -373,18 +373,16 @@ const activeVibrations=vibrationEvents.filter(v=>
 );
 let found=null;
 if(activeVibrations.length){
-  // Each movement pulse records an occupied survivor cell. Randomly select
-  // from recent survivor footsteps so the Rake patrols between moving survivors
-  // instead of always following the loudest or nearest one.
-  const survivorPulses=activeVibrations.filter(v=>v.source?.kind==='ally');
-  const patrolPool=survivorPulses.length?survivorPulses:activeVibrations;
+  // Treat player and survivor footsteps equally: either can become an immediate target.
+  // Every pulse represents a real occupied cell, so the Rake can hunt whoever is moving.
+  const patrolPool=activeVibrations;
   const weightedPool=patrolPool.filter(v=>elapsed-v.time<.85);
   const choices=weightedPool.length?weightedPool:patrolPool;
   // Hold the current target for 11 seconds. Reconsider only after that
   // interval and only if the current target has moved at least 1.25 units.
-  // If survivors are making noise, prioritize hunting them over the player.
-  const currentTarget=rake.target?.alive&&
-    (rake.target.kind==='ally'||!survivorPulses.length)?rake.target:null;
+  // Keep the current living target, but allow any active player or survivor pulse
+  // to become a target; never wait for the player or survivors to die first.
+  const currentTarget=rake.target?.alive?rake.target:null;
   const targetMoved=!!(currentTarget&&rake.targetSwitchPos&&distance(currentTarget.pos,rake.targetSwitchPos)>1.25);
   let chosenSource=currentTarget;
   if(!currentTarget||((elapsed-(rake.targetSwitchAt||0))>=11&&targetMoved)){
@@ -447,10 +445,9 @@ if(activeVibrations.length){
   // detection, not whether the Rake is allowed to find a living target.
   const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
   if(livingTargets.length){
-    // Prefer living survivors whenever any remain; the player is a fallback target.
-    const survivorTargets=allies.filter(actor=>actor.alive);
-    const huntingTargets=survivorTargets.length?survivorTargets:livingTargets;
-    const nearest=[...huntingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
+    // Player and survivors are all valid targets from the start.
+    // Choose the nearest living actor rather than waiting for one group to die.
+    const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
     // Keep one target instead of rolling a new random target every frame.
     // Switch only after 11 seconds and only if the locked target has moved.
     const currentTarget=rake.target?.alive?rake.target:null;
