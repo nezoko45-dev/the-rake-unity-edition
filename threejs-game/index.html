@@ -336,7 +336,7 @@ function updateAlly(a,dt){
   a.group.rotation.y=Math.atan2(a.wanderTarget.x-a.pos.x,a.wanderTarget.z-a.pos.z);play(a,'walk');
  }else play(a,'idle');
 }
-function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
+function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack-=dt;rake.retreatTimer=Math.max(0,(rake.retreatTimer||0)-dt);rake.parryCooldown=(rake.parryCooldown||0)-dt;rake.parryTimer=Math.max(0,(rake.parryTimer||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);if(rake.parryTimer<=0)rake.parryNotice=false;const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
 if(night){
   // Make sure the monster actually enters the player's playable area at
   // nightfall. A remote survivor kill should never leave it unseen all night.
@@ -523,8 +523,22 @@ if(found){
       // Stop the parry immediately if the opponent turns away.
       rake.parryTimer=0;
     }
-    if(found.d<2.5){
-      if(rake.attack<=0){rakeDamageTarget(found.target,found.target.kind==='player'?30:24);rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack')}
+    if(rake.retreatTimer>0){
+      // After striking, retreat for five seconds to create a false sense of safety.
+      if(rake.retreatGoal){
+        moveRakeToward(rake.retreatGoal,7,dt);
+        rake.group.rotation.y=Math.atan2(found.target.pos.x-rake.pos.x,found.target.pos.z-rake.pos.z);
+        if(rake.actualMoveSpeed<.15)play(rake,'idle');else updateRakeMovementAnimation();
+      }else play(rake,'idle');
+    }else if(found.d<2.5){
+      if(rake.attack<=0){
+        rakeDamageTarget(found.target,found.target.kind==='player'?30:24);
+        rake.attack=3;rake.attackAnimTimer=3;play(rake,'attack');
+        const awayX=rake.pos.x-found.target.pos.x,awayZ=rake.pos.z-found.target.pos.z;
+        const awayLength=Math.hypot(awayX,awayZ)||1;
+        rake.retreatGoal={x:rake.pos.x+awayX/awayLength*9,z:rake.pos.z+awayZ/awayLength*9};
+        rake.retreatTimer=5;
+      }
       else{
         // Keep pressure on a moving survivor during the attack cooldown.
         // Only hold position when already close enough to complete the attack.
