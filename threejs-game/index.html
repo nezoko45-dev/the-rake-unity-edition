@@ -448,12 +448,23 @@ if(activeVibrations.length){
   const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
   if(livingTargets.length){
     const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos));
-    // If nobody is making a fresh sound, choose randomly among nearby living
-    // actors rather than hard-locking the player or one survivor.
-    const pool=nearest.slice(0,Math.min(4,nearest.length));
-    const chosen=pool.includes(rake.target)&&Math.random()<.72
-      ?rake.target
-      :pool[Math.floor(Math.random()*pool.length)];
+    // Keep one target instead of rolling a new random target every frame.
+    // Switch only after 11 seconds and only if the locked target has moved.
+    const currentTarget=rake.target?.alive?rake.target:null;
+    const targetMoved=!!(currentTarget&&rake.targetSwitchPos&&distance(currentTarget.pos,rake.targetSwitchPos)>1.25);
+    let chosen=currentTarget||nearest[0];
+    if(!currentTarget||((elapsed-(rake.targetSwitchAt||0))>=11&&targetMoved)){
+      const alternatives=nearest.filter(actor=>actor!==currentTarget);
+      if(alternatives.length)chosen=alternatives[0];
+      if(chosen!==currentTarget){
+        rake.targetSwitchAt=elapsed;
+        rake.targetSwitchPos={x:chosen.pos.x,z:chosen.pos.z};
+      }
+    }
+    if(!rake.targetSwitchPos){
+      rake.targetSwitchAt=elapsed;
+      rake.targetSwitchPos={x:chosen.pos.x,z:chosen.pos.z};
+    }
     const cell={x:chosen.pos.x,z:chosen.pos.z};
     found={target:chosen,cell,d:distance(rake.pos,cell),cellD:distance(rake.pos,cell),visible:true,searching:false};
     rake.lastSeenCell=cell;
