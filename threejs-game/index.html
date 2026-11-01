@@ -415,28 +415,27 @@ if(activeVibrations.length){
 }else if(rake.lastSeenCell&&(rake.searchTimer||0)>0){
   rake.searchTimer=Math.max(0,rake.searchTimer-dt);
   rake.searching=true;
-  // Choose a completely random walkable grid cell anywhere in the forest.
-  // Keep each destination long enough for the Rake to travel toward it.
+  // Randomly patrol previously occupied cells recorded from survivor/player movement.
+  // These are real actor positions from footsteps, not arbitrary empty forest cells.
   if(!rake.searchCell||distance(rake.pos,rake.searchCell)<1.6||
      rake.searchCellUntil<=elapsed||rake.searchCellBlocked){
     const visited=rake.searchVisited||(rake.searchVisited=[]);
-    let next=null;
-    for(let attempt=0;attempt<160;attempt++){
-      const gx=Math.floor(Math.random()*121)-60;
-      const gz=Math.floor(Math.random()*121)-60;
-      const x=gx*HEAT_CELL;
-      const z=gz*HEAT_CELL;
-      const key=gx+','+gz;
-      if(visited.includes(key)||blocked(x,z))continue;
-      next={x,z,key};
-      break;
-    }
-    if(next){
+    const occupiedCells=vibrationEvents
+      .filter(v=>v.source?.alive&&
+        (v.source.kind==='ally'||v.source.kind==='player')&&
+        elapsed-v.time<=35&&!blocked(v.x,v.z))
+      .map(v=>({x:v.x,z:v.z,key:Math.round(v.x/HEAT_CELL)+','+Math.round(v.z/HEAT_CELL)}))
+      .filter(cell=>!visited.includes(cell.key));
+    if(occupiedCells.length){
+      const next=occupiedCells[Math.floor(Math.random()*occupiedCells.length)];
       rake.searchCell={x:next.x,z:next.z};
       visited.push(next.key);
       if(visited.length>36)visited.shift();
-      rake.searchCellUntil=elapsed+12;
+      rake.searchCellUntil=elapsed+8;
       rake.searchCellBlocked=false;
+    }else if(rake.lastSeenCell&&!blocked(rake.lastSeenCell.x,rake.lastSeenCell.z)){
+      rake.searchCell={x:rake.lastSeenCell.x,z:rake.lastSeenCell.z};
+      rake.searchCellUntil=elapsed+3;
     }else{
       rake.searchTimer=0;
     }
