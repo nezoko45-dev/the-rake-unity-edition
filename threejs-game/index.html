@@ -356,11 +356,14 @@ const activeVibrations=vibrationEvents.filter(v=>
 let found=null;
 if(activeVibrations.length){
   const sources=[...new Set(activeVibrations.map(v=>v.source))];
-  // Keep the current source while it is still making noise; only pick a
-  // different random source after the current one goes quiet.
-  const chosenSource=sources.includes(rake.target)
-    ?rake.target
-    :sources[Math.floor(Math.random()*sources.length)];
+  // Every living actor's footsteps compete for the Rake's attention.
+  // Pick among the freshest active footstep sources instead of permanently
+  // favoring the current target.
+  const freshestTime=Math.max(...activeVibrations.map(v=>v.time));
+  const freshestSources=[...new Set(activeVibrations
+    .filter(v=>freshestTime-v.time<.08)
+    .map(v=>v.source))];
+  const chosenSource=freshestSources[Math.floor(Math.random()*freshestSources.length)];
   const pulse=activeVibrations.filter(v=>v.source===chosenSource)
     .sort((a,b)=>b.time-a.time)[0];
   const cell={x:pulse.x,z:pulse.z};
