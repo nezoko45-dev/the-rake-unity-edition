@@ -6,7 +6,7 @@
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#070b10;color:#e8edf2;font:14px system-ui,sans-serif}canvas{display:block}#hud{position:fixed;top:16px;left:16px;z-index:2;padding:14px 16px;background:#071019d9;border:1px solid #52708066;border-radius:10px;min-width:220px;backdrop-filter:blur(8px)}#title{font-size:18px;font-weight:800;letter-spacing:.12em}#status{margin:7px 0;color:#ffcb82;font-weight:700}#help{position:fixed;bottom:16px;left:16px;padding:10px 13px;background:#071019d9;border-radius:8px;color:#b7c6d1;line-height:1.7}#cross{position:fixed;left:50%;top:50%;width:8px;height:8px;border:1px solid #eaf7ff;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}#anims{position:fixed;right:16px;top:16px;z-index:2;max-width:260px;max-height:45vh;overflow:auto;padding:12px 14px;background:#071019d9;border:1px solid #52708066;border-radius:10px;color:#d5e2eb;font:12px/1.55 ui-monospace,monospace;display:none;white-space:pre-wrap}#worldBars{position:fixed;inset:0;pointer-events:none;z-index:3;overflow:hidden}.worldbar{position:absolute;width:54px;height:7px;background:#172027dd;border:1px solid #dce8ef88;border-radius:4px;transform:translate(-50%,-50%);overflow:hidden}.worldbar i{display:block;height:100%;width:100%;background:#69d786}.worldbar.downed i{background:#e34c4c}#notice{position:fixed;left:50%;top:18%;transform:translateX(-50%);padding:10px 16px;background:#101923dd;border-radius:8px;color:#ffd7a0;display:none}#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#020509d9;z-index:5;text-align:center}#panel{max-width:480px;padding:30px}button{background:#e2a65c;color:#101419;border:0;border-radius:7px;padding:12px 20px;font-weight:800;cursor:pointer}small{color:#a6b8c7}
 </style>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/","@recast-navigation/core":"https://cdn.jsdelivr.net/npm/@recast-navigation/core@0.35.0/dist/index.mjs","@recast-navigation/wasm":"https://cdn.jsdelivr.net/npm/@recast-navigation/wasm@0.35.0/dist/recast-navigation.wasm-compat.js","@recast-navigation/generators":"https://cdn.jsdelivr.net/npm/@recast-navigation/generators@0.35.0/dist/index.mjs"}}</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
 </head>
 <body>
 <div id="hud"><div id="title">THE RAKE <span style="color:#e4a45b">/ NIGHT SHIFT</span></div><div id="status">DAY — SAFE(ISH)</div><div id="stats">Health: 100<br>Survivors: 4 / 4<br>Rake: retreating</div><div style="height:7px;background:#27323a;border-radius:5px;overflow:hidden;margin-top:8px"><div id="playerHealthFill" style="height:100%;width:100%;background:#64d68a"></div></div><small>Find the survivors. Stay together.</small></div>
@@ -41,15 +41,30 @@ const sun=new THREE.DirectionalLight(0xffe0ad,2.2);sun.position.set(-35,60,20);s
 const mat=(c,r=.95)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(100000,100000),mat(0x596b43));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;ground.position.y=-.035;scene.add(ground);
 const obstacles=[],trees=[],treeMeshes=[];let seed=991;
-let recastReady=false,forestNavMesh=null,forestNavQuery=null,navBuildQueued=false,navBuildVersion=0;
 let rakeKills=0,rakeSpeed=7;
 const RAKE_CLOSE_CHASE_RANGE=45;
 function recordRakeKill(){rakeKills++;if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;console.info('Rake kill count:',rakeKills)}
-
-async function initializeRecast(){try{const [core,threeNav]=await Promise.all([import('https://cdn.jsdelivr.net/npm/@recast-navigation/core@0.35.0/dist/index.mjs'),import('https://cdn.jsdelivr.net/npm/@recast-navigation/three@0.35.0/dist/index.mjs')]);initRecast=core.init;NavMeshQuery=core.NavMeshQuery;threeToSoloNavMesh=threeNav.threeToSoloNavMesh;await initRecast();recastReady=true;console.info('Recast Navigation initialized');queueForestNavMeshBuild()}catch(err){recastReady=false;forestNavQuery=null;console.error('Optional Recast navigation failed; continuing with collision-aware fallback movement:',err);notify('Advanced navigation unavailable; forest is running in fallback mode.')}}
-function queueForestNavMeshBuild(){if(!recastReady||navBuildQueued)return;navBuildQueued=true;const version=++navBuildVersion;setTimeout(()=>{navBuildQueued=false;buildForestNavMesh(version)},180)}
-function buildForestNavMesh(version){if(!recastReady||!player?.pos||!Number.isFinite(player.pos.x)||!Number.isFinite(player.pos.z))return;const cx=Math.floor(player.pos.x/FOREST_CHUNK),cz=Math.floor(player.pos.z/FOREST_CHUNK);const floor=new THREE.Mesh(navFloorGeometry);floor.rotation.x=-Math.PI/2;floor.position.set((cx+.5)*FOREST_CHUNK,(cz+.5)*FOREST_CHUNK,0);/* position corrected below: nav plane is centered on the active player chunk */floor.position.set(cx*FOREST_CHUNK+FOREST_CHUNK/2,0,cz*FOREST_CHUNK+FOREST_CHUNK/2);const navMeshes=[floor];const blockerGeometry=new THREE.CylinderGeometry(.9,.9,2.8,8);const blockerMaterial=new THREE.MeshBasicMaterial();for(const o of obstacles){const blocker=new THREE.Mesh(new THREE.CylinderGeometry(o.r+.55,o.r+.55,2.8,8),blockerMaterial);blocker.position.set(o.x,1.4,o.z);navMeshes.push(blocker)}let generated;try{generated=threeToSoloNavMesh(navMeshes,{cs:.5,ch:.2,walkableRadius:2,walkableHeight:4,walkableClimb:1,walkableSlopeAngle:45});}catch(err){console.error('Recast navmesh generation threw:',err);return}if(!generated?.success||!generated.navMesh){console.warn('Recast could not generate a forest navmesh');return}const nextQuery=new NavMeshQuery(generated.navMesh);const previousMesh=forestNavMesh,previousQuery=forestNavQuery;forestNavMesh=generated.navMesh;forestNavQuery=nextQuery;if(previousQuery)previousQuery.destroy();if(previousMesh)previousMesh.destroy();console.info('Recast forest navmesh generated from',obstacles.length,'tree obstacles');}
-function findNavPath(start,goal){if(!forestNavQuery||!start||!goal||![start.x,start.z,goal.x,goal.z].every(Number.isFinite))return null;const result=forestNavQuery.computePath({x:start.x,y:0,z:start.z},{x:goal.x,y:0,z:goal.z},{halfExtents:{x:8,y:8,z:8},maxPathPolys:512,maxStraightPathPoints:128});if(!result?.success||!result.path?.length)return null;return result.path.filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z)).map(p=>({x:p.x,z:p.z}))}function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
+const RAKE_NAV_CELL=2.25;
+function rakeBridgeClear(ax,az,bx,bz){const len=Math.hypot(bx-ax,bz-az),steps=Math.max(2,Math.ceil(len/(RAKE_NAV_CELL*.18)));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
+function rakeFindPath(start,goal){
+ if(!start||!goal||![start.x,start.z,goal.x,goal.z].every(Number.isFinite))return null;
+ const cs=RAKE_NAV_CELL,sx=Math.floor(start.x/cs),sz=Math.floor(start.z/cs),gx=Math.floor(goal.x/cs),gz=Math.floor(goal.z/cs);
+ const minX=Math.min(sx,gx)-12,maxX=Math.max(sx,gx)+12,minZ=Math.min(sz,gz)-12,maxZ=Math.max(sz,gz);
+ const key=(x,z)=>x+','+z,center=(x,z)=>({x:(x+.5)*cs,z:(z+.5)*cs});
+ const startK=key(sx,sz),goalK=key(gx,gz),open=[{x:sx,z:sz,k:startK}],came=new Map(),g=new Map([[startK,0]]),closed=new Set();
+ const h=(x,z)=>Math.hypot(x-gx,z-gz);
+ while(open.length&&closed.size<18000){
+  open.sort((a,b)=>(g.get(a.k)+h(a.x,a.z))-(g.get(b.k)+h(b.x,b.z)));
+  const cur=open.shift();if(closed.has(cur.k))continue;closed.add(cur.k);const cp=center(cur.x,cur.z);
+  if(cur.k===goalK||(h(cur.x,cur.z)<=1&&rakeBridgeClear(cp.x,cp.z,goal.x,goal.z))){
+   let keys=[cur.k];while(keys[0]!==startK&&came.has(keys[0]))keys.unshift(came.get(keys[0]));
+   return keys.map(k=>{const [x,z]=k.split(',').map(Number);return center(x,z)}).concat([{x:goal.x,z:goal.z}]);
+  }
+  for(let oz=-1;oz<=1;oz++)for(let ox=-1;ox<=1;ox++){if(!ox&&!oz)continue;const x=cur.x+ox,z=cur.z+oz;if(x<minX||x>maxX||z<minZ||z>maxZ)continue;const nk=key(x,z);if(closed.has(nk))continue;const q=center(x,z);if(!rakeBridgeClear(cp.x,cp.z,q.x,q.z))continue;const ng=g.get(cur.k)+Math.hypot(ox,oz);if(ng<(g.get(nk)??Infinity)){g.set(nk,ng);came.set(nk,cur.k);if(!open.some(n=>n.k===nk))open.push({x,z,k:nk})}}
+ }
+ return null;
+}
+function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
 const FOREST_CHUNK=40,FOREST_RADIUS=2,forestChunks=new Map();let lastForestAnchor='';
 const navFloorGeometry=new THREE.PlaneGeometry(FOREST_CHUNK*5,FOREST_CHUNK*5);
 function chunkRandFactory(cx,cz){let state=(Math.imul(cx+8191,73856093)^Math.imul(cz+8191,19349663)^991)>>>0;return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296}}
@@ -69,7 +84,7 @@ const player={kind:'player',pos:controls.getObject().position,hp:100,maxHp:100,a
 function randomAISpawn(){for(let tries=0;tries<800;tries++){const x=(rand()-.5)*320,z=(rand()-.5)*320;if(Math.hypot(x,z)<18||Math.hypot(x+43,z+43)<10)continue;if(!walkablePoint(x,z))continue;return new THREE.Vector3(x,0,z)}return new THREE.Vector3(70,0,-70)}
 const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeActor('ally',spawn.x,spawn.z,[0x536d87,0x89775e,0x677d6a,0x82718c][i]);a.spawn=spawn.clone();allies.push(a)}
 loadRake();
-void initializeRecast();
+void 
 // Use paths relative to this module, so GitHub Pages serves the files from
 // /the-rake-unity-edition/Assets/ even when the game is hosted in a subfolder.
 const dayMusic=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url).href);
