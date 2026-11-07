@@ -224,7 +224,7 @@ function updateAlly(a,dt){
   a.wanderTarget=null;
   const dx=a.pos.x-threat.x,dz=a.pos.z-threat.z,len=Math.hypot(dx,dz)||.001,close=d<3.2;
   if(rake.alive&&d<2.8&&a.attack<=0){damage(rake,8);a.attack=.8}
-  if(a.think<=0||!a.path?.length||a.pathFailed){
+  if(a.think<=0||!a.pathGoal||a.pathFailed){
    const side=a.dodgeSide||1,angle=Math.atan2(dz,dx);
    const choices=[.72,-.72,1.15,-1.15].map(offset=>({x:a.pos.x+Math.cos(angle+offset)*15,z:a.pos.z+Math.sin(angle+offset)*15}));
    const goal=choices.find(p=>!blocked(p.x,p.z));
@@ -232,7 +232,7 @@ function updateAlly(a,dt){
    a.think=.75;
    if(!goal||a.pathFailed)a.dodgeSide=-side;
   }
-  if(a.path?.length)movePath(a,close?2.2:4.2,dt);
+  if(a.pathGoal)movePath(a,close?2.2:4.2,dt);
   else{a.pathFailed=true;a.think=0;a.dodgeSide=-(a.dodgeSide||1)}
   a.group.rotation.y=Math.atan2(-dx,-dz);play(a,close?'attack':'run');return;
  }
@@ -280,7 +280,7 @@ if(night){
   }
   rake.nightEntered=false;
 }
-if(!night){rake.group.visible=true;rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setPath(rake,home);rake.think=.8}if(distance(rake.pos,home)>2){setPath(rake,home);movePath(rake,rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+if(!night){rake.group.visible=true;rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.pathGoal||rake.pathFailed)){setPath(rake,home);rake.think=.8}if(distance(rake.pos,home)>2){setPath(rake,home);movePath(rake,rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
 /* Basic night chase: movement sounds choose the target, and the Rake
    immediately switches to another moving living actor. */
 const RAKE_HEARING_RANGE=45;
