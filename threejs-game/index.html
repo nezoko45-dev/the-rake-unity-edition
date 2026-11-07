@@ -212,7 +212,7 @@ function updateAlly(a,dt){
   if(distance(a.pos,player.pos)>2.5){
    if(a.think<=0||!a.path?.length||distance(a.pathGoal||a.pos,player.pos)>4){setPath(a,player.pos);a.think=.55}
    if(a.path?.length)movePath(a,3.8,dt);
-   else clearMove(a,(player.pos.x-a.pos.x)*dt,(player.pos.z-a.pos.z)*dt);
+   else{a.pathFailed=true;a.think=0;}
    play(a,'run');
   }else play(a,'idle');
   return;
