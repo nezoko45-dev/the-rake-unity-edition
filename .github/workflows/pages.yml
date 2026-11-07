@@ -40,7 +40,10 @@ jobs:
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
+          name: forest-pages-build
           path: .
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: forest-pages-build
