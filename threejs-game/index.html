@@ -433,7 +433,7 @@ if(target){
     rake.pathFailed=false;rake.think=0;
   }
   rake.searching=false;rake.lastSeenCell={x:target.pos.x,z:target.pos.z};
-  rakeSpeed=distance(rake.pos,target.pos)<=RAKE_CLOSE_CHASE_RANGE?19:7;
+  rakeSpeed=distance(rake.pos,target.pos)<=RAKE_CLOSE_CHASE_RANGE?10:7;
   const goal={x:target.pos.x,z:target.pos.z};
   if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed||
      distance(rake.pathGoal,goal)>2){
