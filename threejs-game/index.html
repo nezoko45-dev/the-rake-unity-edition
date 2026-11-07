@@ -176,7 +176,6 @@ function setPath(actor,target){
  if(!actor?.pos||!target||![actor.pos.x,actor.pos.z,target.x,target.z].every(Number.isFinite)){if(actor){actor.pathGoal=null;actor.pathFailed=true}return}
  actor.pathGoal={x:target.x,z:target.z};actor.pathFailed=false;
 }
-}
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,2.05,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;controls.getObject().updateMatrixWorld(true);notify('You have respawned!');}
 function notify(t,duration=2300){const n=document.getElementById('notice');n.textContent=t;n.style.display='block';clearTimeout(notify.timer);notify.timer=setTimeout(()=>n.style.display='none',duration)}
 function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a.maxHp||65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||(a.isRake?RAKE_SPAWN:new THREE.Vector3(-43,0,-43)));a.group.position.copy(a.pos);a.pathGoal=null;a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
