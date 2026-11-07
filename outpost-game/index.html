@@ -53,7 +53,7 @@ for(let i=0;i<4;i++)survivors.push(makeSurvivor([-8,8,-8,8][i],[8,8,-8,-8][i],i)
 function updateSurvivors(dt){const p=controls.getObject().position;for(const a of survivors){if(a.hp<=0){if(elapsed>=a.respawnAt){a.hp=100;a.x=a.spawnX;a.z=a.spawnZ;a.mesh.visible=true;a.target=null;a.nextPick=elapsed+1;notice('A survivor respawned')}else{a.mesh.visible=false;continue}}const rakeD=Math.hypot(monster?monster.position.x-a.x:999,monster?monster.position.z-a.z:999);a.attack=!!monster&&rakeD<2.8;let moving=false;if(a.attack){a.mesh.rotation.y=Math.atan2(monster.position.x-a.x,monster.position.z-a.z);a.phase+=dt*8;a.arms[0].rotation.x=-1.8+Math.sin(a.phase)*.25;a.arms[1].rotation.x=-1.8-Math.sin(a.phase)*.25;a.legs[0].rotation.x=0;a.legs[1].rotation.x=0}
 else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){const angle=rand()*Math.PI*2,dist=10+rand()*24;a.target={x:a.x+Math.cos(angle)*dist,z:a.z+Math.sin(angle)*dist};a.nextPick=elapsed+6+rand()*8}
 const beforeX=a.x,beforeZ=a.z;cellBridgeMove(a,a.target,dt,randWalkSpeed(a));moving=Math.hypot(a.x-beforeX,a.z-beforeZ)>.002;if(moving)a.mesh.rotation.y=Math.atan2(a.target.x-a.x,a.target.z-a.z);a.phase+=dt*(moving?7:2);const swing=moving?Math.sin(a.phase)*.65:Math.sin(a.phase)*.04;a.legs[0].rotation.x=swing;a.legs[1].rotation.x=-swing;a.arms[0].rotation.x=-swing*.7;a.arms[1].rotation.x=swing*.7}
-a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving?.045:.012),a.z)}}
+a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)}}
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
 
 function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the forest…')}
