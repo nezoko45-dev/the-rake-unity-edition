@@ -89,7 +89,7 @@ const nightMusic=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouch
 const musicTracks={day:dayMusic,night:nightMusic};
 for(const [label,audio] of Object.entries(musicTracks)){
  audio.loop=true;
- audio.preload='auto';
+ audio.preload='none';
  audio.volume=.55;
  audio.addEventListener('error',()=>{
    console.error(label+' music failed to load:',audio.currentSrc,audio.error);
@@ -108,6 +108,8 @@ async function playMusicMode(mode){
  if(musicMode===activeMode&&!active.paused)return;
  musicMode=activeMode;
  try{
+   // Fetch/decode only the selected track; keep the inactive soundtrack unloaded.
+   if(active.readyState===0)active.load();
    await active.play();
    console.info('Game music started:',activeMode,active.currentSrc);
  }catch(err){
