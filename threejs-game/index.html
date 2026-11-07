@@ -265,22 +265,11 @@ if(night){
   rake.group.visible=true;
   if(!rake.nightEntered){
     rake.nightEntered=true;
-    if(distance(rake.pos,player.pos)>30){
-      let spawn=null;
-      for(let attempt=0;attempt<48;attempt++){
-        const angle=Math.random()*Math.PI*2;
-        const radius=19+Math.random()*7;
-        const x=player.pos.x+Math.cos(angle)*radius;
-        const z=player.pos.z+Math.sin(angle)*radius;
-        if(!blocked(x,z)){spawn={x,z};break}
-      }
-      if(spawn){
-        rake.pos.set(spawn.x,0,spawn.z);
-        rake.group.position.set(spawn.x,0,spawn.z);
-        rake.path=[];rake.pathGoal=null;rake.pathIndex=0;rake.pathFailed=false;
-        rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;
-      }
-    }
+    // Keep nightfall transition lightweight: don't teleport the Rake or
+    // trigger an immediate forest-chunk rebuild when the clock flips.
+    rake.path=[];rake.pathGoal=null;rake.pathIndex=0;rake.pathFailed=false;
+    rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;
+    rake.think=0;
   }
 }else{
   if(rake.nightEntered){
