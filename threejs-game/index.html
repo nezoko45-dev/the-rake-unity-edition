@@ -370,7 +370,7 @@ function updateAlly(a,dt){
    else{a.wanderTarget=null;a.think=0}
    a.group.position.x=a.pos.x;a.group.position.z=a.pos.z;
   }
-  a.group.rotation.y=Math.atan2(a.wanderTarget.x-a.pos.x,a.wanderTarget.z-a.pos.z);play(a,'walk');
+  if(a.wanderTarget&&Number.isFinite(a.wanderTarget.x)&&Number.isFinite(a.wanderTarget.z)){a.group.rotation.y=Math.atan2(a.wanderTarget.x-a.pos.x,a.wanderTarget.z-a.pos.z);play(a,'walk')}else play(a,'idle');
  }else play(a,'idle');
 }
 function updateRake(dt){if(!rake.alive){rake.respawn-=dt;if(rake.respawn<=0)respawn(rake);return}rake.think-=dt;rake.attack=Math.max(0,(rake.attack||0)-dt);rake.attackAnimTimer=Math.max(0,(rake.attackAnimTimer||0)-dt);rake.retreatScreamTimer=Math.max(0,(rake.retreatScreamTimer||0)-dt);const t=elapsed%DAY_LENGTH;night=t>=DAY_LENGTH*.25;
