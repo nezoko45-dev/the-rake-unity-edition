@@ -169,7 +169,7 @@ function hasLineOfSight(from,to){if(!from?.pos||!to?.pos||![from.pos.x,from.pos.
 function setPath(actor,target){
   if(!actor?.pos||!target||!Number.isFinite(target.x)||!Number.isFinite(target.z)){if(actor){actor.path=[];actor.pathGoal=null;actor.pathFailed=true}return}
   actor.pathGoal={x:target.x,z:target.z};actor.pathIndex=0;
-  const route=findNavPath(actor.pos,target);
+  const route=rakeFindPath(actor.pos,target);
   actor.path=route||[];actor.pathFailed=!route||!route.length;
 }
 // Waypoint navigation: route around blocking trees without grid cells.
@@ -182,7 +182,6 @@ function segmentBlocked(ax,az,bx,bz){
   }
   return null;
 }
-function rakeFindPath(start,goal){return findNavPath(start,goal)}
 function setRakePath(target){
   if(!rake?.pos||!target||!Number.isFinite(target.x)||!Number.isFinite(target.z)){rake.path=[];rake.pathGoal=null;rake.pathFailed=true;return}
   const route=rakeFindPath(rake.pos,target);
