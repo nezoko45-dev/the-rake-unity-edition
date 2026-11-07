@@ -48,7 +48,7 @@ function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject()
  else if(d<2.15){enemyState='attack';goal=p;enemySpeed=0}
  else if(d<18){enemyState='hunt';goal=p;enemySpeed=d<4?6.8:5.8}
  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal=noisePos;enemySpeed=4.8}
- else{enemyState='patrol';enemySpeed=3.7;if(!patrolTarget||elapsed>=patrolPickAt){const cells=[{x:p.x,z:p.z},...survivors.map(a=>({x:a.x,z:a.z}))];patrolTarget=cells[Math.floor(rand()*cells.length)];patrolPickAt=elapsed+4+rand()*3}goal=patrolTarget}
+ else{enemyState='patrol';enemySpeed=3.7;if(!patrolTarget||elapsed>=patrolPickAt){const targets=survivors.filter(a=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)>2.5);const pool=targets.length?targets:[{x:p.x,z:p.z}];patrolTarget=pool[Math.floor(rand()*pool.length)];patrolPickAt=elapsed+5+rand()*2}goal=patrolTarget}
  const navActor={x:monster.position.x,z:monster.position.z};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
  if(enemyState==='attack')anim(/attack|hit/i);else if(enemyState==='hunt')anim(/run|walk/i);else anim(/walk/i);
