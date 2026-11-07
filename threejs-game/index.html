@@ -46,22 +46,21 @@ const RAKE_CLOSE_CHASE_RANGE=45;
 function recordRakeKill(){rakeKills++;if(Math.random()<.03)rake.runAnimUntil=(elapsed||0)+2.5;console.info('Rake kill count:',rakeKills)}
 const RAKE_NAV_CELL=2.25;
 function rakeBridgeClear(ax,az,bx,bz){const len=Math.hypot(bx-ax,bz-az),steps=Math.max(2,Math.ceil(len/(RAKE_NAV_CELL*.18)));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
-function rakeFindPath(start,goal){
- if(!start||!goal||![start.x,start.z,goal.x,goal.z].every(Number.isFinite))return null;
- const cs=RAKE_NAV_CELL,sx=Math.floor(start.x/cs),sz=Math.floor(start.z/cs),gx=Math.floor(goal.x/cs),gz=Math.floor(goal.z/cs);
- const key=(x,z)=>x+','+z,center=(x,z)=>({x:(x+.5)*cs,z:(z+.5)*cs});
- const startK=key(sx,sz),open=[{x:sx,z:sz,k:startK}],came=new Map(),g=new Map([[startK,0]]),closed=new Set(),openMap=new Map([[startK,open[0]]]);
- const h=(x,z)=>Math.hypot(x-gx,z-gz);let expanded=0;
- while(open.length&&expanded<1200){
-  let bi=0,bf=Infinity;for(let i=0;i<open.length;i++){const n=open[i],f=g.get(n.k)+h(n.x,n.z);if(f<bf){bf=f;bi=i}}
-  const cur=open.splice(bi,1)[0];openMap.delete(cur.k);if(closed.has(cur.k))continue;closed.add(cur.k);expanded++;const cp=center(cur.x,cur.z);
-  if(cur.x===gx&&cur.z===gz||(h(cur.x,cur.z)<=1&&rakeBridgeClear(cp.x,cp.z,goal.x,goal.z))){
-   const ks=[cur.k];while(ks[0]!==startK&&came.has(ks[0]))ks.unshift(came.get(ks[0]));
-   return ks.map(k=>{const [x,z]=k.split(',').map(Number);return center(x,z)}).concat([{x:goal.x,z:goal.z}]);
-  }
-  for(let oz=-1;oz<=1;oz++)for(let ox=-1;ox<=1;ox++){if(!ox&&!oz)continue;const x=cur.x+ox,z=cur.z+oz,k=key(x,z);if(closed.has(k))continue;const q=center(x,z);if(!rakeBridgeClear(cp.x,cp.z,q.x,q.z))continue;const ng=g.get(cur.k)+Math.hypot(ox,oz);if(ng>=(g.get(k)??Infinity))continue;g.set(k,ng);came.set(k,cur.k);const n=openMap.get(k);if(n){n.x=x;n.z=z}else{const nn={x,z,k};open.push(nn);openMap.set(k,nn)}}
+// Local ray-bridge steering: no A*, no route search. Each actor tests only
+// its immediate neighboring cell centers and chooses the clearest one toward goal.
+function rakeSteerCell(actor,goal){
+ const cs=RAKE_NAV_CELL;if(!actor?.pos||!goal)return null;
+ const x=actor.pos.x,z=actor.pos.z;
+ if(rakeBridgeClear(x,z,goal.x,goal.z))return {x:goal.x,z:goal.z};
+ const cx=Math.floor(x/cs),cz=Math.floor(z/cs);let best=null,bestScore=Infinity;
+ for(let oz=-1;oz<=1;oz++)for(let ox=-1;ox<=1;ox++){
+  if(!ox&&!oz)continue;
+  const px=(cx+ox+.5)*cs,pz=(cz+oz+.5)*cs;
+  if(blocked(px,pz)||!rakeBridgeClear(x,z,px,pz))continue;
+  const score=Math.hypot(goal.x-px,goal.z-pz)+Math.hypot(px-x,pz-z)*.22;
+  if(score<bestScore){bestScore=score;best={x:px,z:pz}}
  }
- return null;
+ return best;
 }
 function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
 const FOREST_CHUNK=40,FOREST_RADIUS=2,forestChunks=new Map();let lastForestAnchor='';
@@ -166,12 +165,8 @@ const rakeGroundRay=new THREE.Raycaster();const rakeGroundOrigin=new THREE.Vecto
 function floatRakeAboveGround(actor,dt){if(!actor?.isRake||!actor.group)return;const x=actor.pos.x,z=actor.pos.z;rakeGroundOrigin.set(x,120,z);rakeGroundRay.set(rakeGroundOrigin,rakeGroundDown);rakeGroundRay.far=240;const hits=rakeGroundRay.intersectObject(ground,false);if(!hits.length)return;const targetY=hits[0].point.y+(actor.groundOffset??.05);const currentY=Number.isFinite(actor.pos.y)?actor.pos.y:actor.group.position.y;const adjustedY=THREE.MathUtils.damp(currentY,targetY,12,dt||.016);actor.pos.y=adjustedY;actor.group.position.y=adjustedY}
 function hasLineOfSight(from,to){if(!from?.pos||!to?.pos||![from.pos.x,from.pos.z,to.pos.x,to.pos.z].every(Number.isFinite))return false;const dx=to.pos.x-from.pos.x,dz=to.pos.z-from.pos.z,len=Math.hypot(dx,dz);if(len<.01)return true;for(const o of obstacles){const t=Math.max(0,Math.min(1,((o.x-from.pos.x)*dx+(o.z-from.pos.z)*dz)/(len*len)));const px=from.pos.x+dx*t,pz=from.pos.z+dz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+.25)return false}return true}
 function setPath(actor,target){
-  if(!actor?.pos||!target||![actor.pos.x,actor.pos.z,target.x,target.z].every(Number.isFinite)){if(actor){actor.path=[];actor.pathGoal=null;actor.pathFailed=true}return}
-  actor.pathGoal={x:target.x,z:target.z};actor.pathIndex=0;
-  // Survivors route cell-to-cell along obstacle-tested ray bridges.
-  const route=rakeFindPath(actor.pos,target);
-  actor.path=Array.isArray(route)?route.filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z)):[];
-  actor.pathFailed=!actor.path.length;
+ if(!actor?.pos||!target||![actor.pos.x,actor.pos.z,target.x,target.z].every(Number.isFinite)){if(actor){actor.pathGoal=null;actor.pathFailed=true}return}
+ actor.pathGoal={x:target.x,z:target.z};actor.pathFailed=false;
 }
 }
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,2.05,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;controls.getObject().updateMatrixWorld(true);notify('You have respawned!');}
