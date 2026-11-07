@@ -164,6 +164,14 @@ function walkablePoint(x,z){return !blocked(x,z)}
 const rakeGroundRay=new THREE.Raycaster();const rakeGroundOrigin=new THREE.Vector3();const rakeGroundDown=new THREE.Vector3(0,-1,0);
 function floatRakeAboveGround(actor,dt){if(!actor?.isRake||!actor.group)return;const x=actor.pos.x,z=actor.pos.z;rakeGroundOrigin.set(x,120,z);rakeGroundRay.set(rakeGroundOrigin,rakeGroundDown);rakeGroundRay.far=240;const hits=rakeGroundRay.intersectObject(ground,false);if(!hits.length)return;const targetY=hits[0].point.y+(actor.groundOffset??.05);const currentY=Number.isFinite(actor.pos.y)?actor.pos.y:actor.group.position.y;const adjustedY=THREE.MathUtils.damp(currentY,targetY,12,dt||.016);actor.pos.y=adjustedY;actor.group.position.y=adjustedY}
 function hasLineOfSight(from,to){if(!from?.pos||!to?.pos||![from.pos.x,from.pos.z,to.pos.x,to.pos.z].every(Number.isFinite))return false;const dx=to.pos.x-from.pos.x,dz=to.pos.z-from.pos.z,len=Math.hypot(dx,dz);if(len<.01)return true;for(const o of obstacles){const t=Math.max(0,Math.min(1,((o.x-from.pos.x)*dx+(o.z-from.pos.z)*dz)/(len*len)));const px=from.pos.x+dx*t,pz=from.pos.z+dz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+.25)return false}return true}
+function movePath(actor,speed,dt){
+ const goal=actor?.pathGoal;if(!actor?.pos||!actor.group||!goal)return false;
+ const steer=rakeSteerCell(actor,goal);if(!steer){actor.pathFailed=true;actor.think=0;return false}
+ const dx=steer.x-actor.pos.x,dz=steer.z-actor.pos.z,len=Math.hypot(dx,dz);if(len<.04)return false;
+ const step=Math.min(Math.max(0,speed*dt),len),nx=actor.pos.x+dx/len*step,nz=actor.pos.z+dz/len*step;
+ if(!rakeBridgeClear(actor.pos.x,actor.pos.z,nx,nz)){actor.pathFailed=true;actor.think=0;return false}
+ actor.pos.x=nx;actor.pos.z=nz;actor.group.position.x=nx;actor.group.position.z=nz;actor.group.rotation.y=Math.atan2(dx,dz);return true;
+}
 function setPath(actor,target){
  if(!actor?.pos||!target||![actor.pos.x,actor.pos.z,target.x,target.z].every(Number.isFinite)){if(actor){actor.pathGoal=null;actor.pathFailed=true}return}
  actor.pathGoal={x:target.x,z:target.z};actor.pathFailed=false;
@@ -171,7 +179,7 @@ function setPath(actor,target){
 }
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,2.05,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;controls.getObject().updateMatrixWorld(true);notify('You have respawned!');}
 function notify(t,duration=2300){const n=document.getElementById('notice');n.textContent=t;n.style.display='block';clearTimeout(notify.timer);notify.timer=setTimeout(()=>n.style.display='none',duration)}
-function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a.maxHp||65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||(a.isRake?RAKE_SPAWN:new THREE.Vector3(-43,0,-43)));a.group.position.copy(a.pos);a.path=[];a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
+function respawn(a){a.alive=true;a.downed=false;a.bleedout=0;a.rakeHits=0;a.hp=a.maxHp||65;a.group.visible=true;if(a.kind==='ally')a.spawn=randomAISpawn();a.pos.copy(a.spawn||(a.isRake?RAKE_SPAWN:new THREE.Vector3(-43,0,-43)));a.group.position.copy(a.pos);a.pathGoal=null;a.pathIndex=0;if(a.isRake)notify('The Rake has returned...')}
 let fireCooldown=0,playerAttackHeld=false;addEventListener('mousedown',e=>{if(e.button!==0||!controls.isLocked||!player.alive)return;playerAttackHeld=true;strikeRake()});addEventListener('mouseup',e=>{if(e.button===0)playerAttackHeld=false});addEventListener('blur',()=>playerAttackHeld=false);
 function strikeRake(){if(!player.alive||player.attack>0)return;player.attack=.32;if(rake.alive&&distance(player.pos,rake.pos)<3.5){damage(rake,22);notify('You struck the Rake!')}}
 function updateAlly(a,dt){
@@ -204,8 +212,8 @@ function updateAlly(a,dt){
  if(player.hp<=35&&player.alive&&(!rake.alive||d>8)){
   a.wanderTarget=null;
   if(distance(a.pos,player.pos)>2.5){
-   if(a.think<=0||!a.path?.length||distance(a.pathGoal||a.pos,player.pos)>4){setPath(a,player.pos);a.think=.55}
-   if(a.path?.length)movePath(a,3.8,dt);
+   if(a.think<=0||!a.pathGoal||distance(a.pathGoal||a.pos,player.pos)>4){setPath(a,player.pos);a.think=.55}
+   if(a.pathGoal)movePath(a,3.8,dt);
    else{a.pathFailed=true;a.think=0;}
    play(a,'run');
   }else play(a,'idle');
