@@ -237,13 +237,13 @@ function updateAlly(a,dt){
   a.group.rotation.y=Math.atan2(-dx,-dz);play(a,close?'attack':'run');return;
  }
  if(alerted&&a.lastKnownRake){
-  if(a.think<=0||!a.path?.length||a.pathFailed){
+  if(a.think<=0||!a.pathGoal||a.pathFailed){
    const angle=rand()*Math.PI*2,radius=3+rand()*9;
    const goal={x:a.lastKnownRake.x+Math.cos(angle)*radius,z:a.lastKnownRake.z+Math.sin(angle)*radius};
    if(!blocked(goal.x,goal.z))setPath(a,goal);
    a.think=1.2;
   }
-  if(a.path?.length){movePath(a,2.8,dt);play(a,'walk');return}
+  if(a.pathGoal){movePath(a,2.8,dt);play(a,'walk');return}
  }
  if(!a.wanderTarget||a.think<=0||distance(a.pos,a.wanderTarget)<1.8||a.pathFailed){
   a.pathFailed=false;a.path=[];a.pathIndex=0;
@@ -309,7 +309,7 @@ if(target){
   rake.searching=false;rake.lastSeenCell={x:target.pos.x,z:target.pos.z};
   rakeSpeed=distance(rake.pos,target.pos)<=RAKE_CLOSE_CHASE_RANGE?10:7;
   const goal={x:target.pos.x,z:target.pos.z};
-  if(rake.think<=0||!rake.pathGoal||!rake.path?.length||rake.pathFailed||
+  if(rake.think<=0||!rake.pathGoal||!rake.pathGoal||rake.pathFailed||
      distance(rake.pathGoal,goal)>2){
     setPath(rake,goal);rake.think=.35;
   }
