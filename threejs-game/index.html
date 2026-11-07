@@ -167,118 +167,13 @@ const rakeGroundRay=new THREE.Raycaster();const rakeGroundOrigin=new THREE.Vecto
 function floatRakeAboveGround(actor,dt){if(!actor?.isRake||!actor.group)return;const x=actor.pos.x,z=actor.pos.z;rakeGroundOrigin.set(x,120,z);rakeGroundRay.set(rakeGroundOrigin,rakeGroundDown);rakeGroundRay.far=240;const hits=rakeGroundRay.intersectObject(ground,false);if(!hits.length)return;const targetY=hits[0].point.y+(actor.groundOffset??.05);const currentY=Number.isFinite(actor.pos.y)?actor.pos.y:actor.group.position.y;const adjustedY=THREE.MathUtils.damp(currentY,targetY,12,dt||.016);actor.pos.y=adjustedY;actor.group.position.y=adjustedY}
 function hasLineOfSight(from,to){if(!from?.pos||!to?.pos||![from.pos.x,from.pos.z,to.pos.x,to.pos.z].every(Number.isFinite))return false;const dx=to.pos.x-from.pos.x,dz=to.pos.z-from.pos.z,len=Math.hypot(dx,dz);if(len<.01)return true;for(const o of obstacles){const t=Math.max(0,Math.min(1,((o.x-from.pos.x)*dx+(o.z-from.pos.z)*dz)/(len*len)));const px=from.pos.x+dx*t,pz=from.pos.z+dz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+.25)return false}return true}
 function setPath(actor,target){
-  if(!actor?.pos||!target||!Number.isFinite(target.x)||!Number.isFinite(target.z)){if(actor){actor.path=[];actor.pathGoal=null;actor.pathFailed=true}return}
+  if(!actor?.pos||!target||![actor.pos.x,actor.pos.z,target.x,target.z].every(Number.isFinite)){if(actor){actor.path=[];actor.pathGoal=null;actor.pathFailed=true}return}
   actor.pathGoal={x:target.x,z:target.z};actor.pathIndex=0;
+  // Survivors route cell-to-cell along obstacle-tested ray bridges.
   const route=rakeFindPath(actor.pos,target);
-  actor.path=route||[];actor.pathFailed=!route||!route.length;
+  actor.path=Array.isArray(route)?route.filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.z)):[];
+  actor.pathFailed=!actor.path.length;
 }
-// Waypoint navigation: route around blocking trees without grid cells.
-function segmentBlocked(ax,az,bx,bz){
-  const dx=bx-ax,dz=bz-az,len2=dx*dx+dz*dz;
-  for(const o of obstacles){
-    const t=len2>0?THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/len2,0,1):0;
-    const px=ax+dx*t,pz=az+dz*t;
-    if(Math.hypot(px-o.x,pz-o.z)<o.r+NAV_CLEARANCE)return o;
-  }
-  return null;
-}
-function setRakePath(target){
-  if(!rake?.pos||!target||!Number.isFinite(target.x)||!Number.isFinite(target.z)){rake.path=[];rake.pathGoal=null;rake.pathFailed=true;return}
-  const route=rakeFindPath(rake.pos,target);
-  rake.path=route||[];rake.pathIndex=0;rake.pathGoal={x:target.x,z:target.z};
-  rake.pathFailed=!route||!route.length;rake.pathRetry=0;
-}
-const rakeTurnHelper=new THREE.Object3D();
-function updateRakeMovementAnimation(){
-  if((rake.attackAnimTimer||0)>0||(rake.retreatScreamTimer||0)>0)return;
-  const movingSpeed=rake.actualMoveSpeed||0;
-  if(movingSpeed<.05){play(rake,'idle');return}
-  // Walk below 8 speed; switch to Run at 8 and above.
-  const useRun=movingSpeed>=8;
-  const requested=useRun?'run':'walk';
-  if(!play(rake,requested)&&!play(rake,useRun?'walk':'run')){
-    play(rake,'idle');
-    return;
-  }
-  const action=rake.current;
-  if(action){
-    action.enabled=true;
-    action.paused=false;
-    if(!action.isRunning()){action.reset();action.play()}
-    const rate=useRun
-      ?THREE.MathUtils.clamp(movingSpeed/8,.75,1.35)
-      :THREE.MathUtils.clamp(movingSpeed/3.5,.65,1.15);
-    action.setEffectiveTimeScale(rate);
-    action.setEffectiveWeight(1);
-  }
-}
-function moveRakeToward(goal,speed,dt){
-  rake.actualMoveSpeed=0;
-  const dx=goal.x-rake.pos.x,dz=goal.z-rake.pos.z,len=Math.hypot(dx,dz);
-  if(len<.12)return;
-  const step=Math.min(speed*dt,len),base=Math.atan2(dz,dx);
-  const offsets=[0,.45,-.45,.9,-.9,1.35,-1.35,Math.PI];
-  for(const offset of offsets){
-    const angle=base+offset,nx=rake.pos.x+Math.cos(angle)*step,nz=rake.pos.z+Math.sin(angle)*step;
-    if(blocked(nx,nz))continue;
-    rake.pos.x=nx;rake.pos.z=nz;rake.group.position.x=nx;rake.group.position.z=nz;
-    rake.actualMoveSpeed=dt>0?step/dt:0;
-    rake.group.rotation.y=Math.atan2(Math.cos(angle),Math.sin(angle));
-    return;
-  }
-}
-function moveRakePath(speed,dt){
-  rake.actualMoveSpeed=0;
-  if(!rake.path?.length||rake.pathIndex>=rake.path.length)return;
-  let node=rake.path[rake.pathIndex];
-  while(node&&distance(rake.pos,node)<.65){rake.pathIndex++;node=rake.path[rake.pathIndex]}
-  if(!node)return;
-  const dx=node.x-rake.pos.x,dz=node.z-rake.pos.z,len=Math.hypot(dx,dz);
-  if(len<.001)return;
-  const step=Math.min(speed*dt,len),nx=rake.pos.x+dx/len*step,nz=rake.pos.z+dz/len*step;
-  if(!blocked(nx,nz)){
-    rake.pos.x=nx;rake.pos.z=nz;rake.group.position.x=nx;rake.group.position.z=nz;rake.actualMoveSpeed=dt>0?step/dt:0;
-    rakeTurnHelper.position.set(0,0,0);
-    rakeTurnHelper.lookAt(dx,0,dz);
-    rake.group.quaternion.rotateTowards(rakeTurnHelper.quaternion,3.2*dt);
-  }else{rake.pathFailed=true;rake.path=[];rake.pathIndex=0}
-}
-function movePath(actor,speed,dt){
-  if(!actor.path?.length||actor.pathIndex>=actor.path.length){actor.pathFailed=true;actor.think=0;return}
-  let node=actor.path[actor.pathIndex];
-  while(node&&distance(actor.pos,node)<.7){actor.pathIndex++;node=actor.path[actor.pathIndex]}
-  if(!node){actor.path=[];actor.pathIndex=0;actor.pathGoal=null;return}
-  const dx=node.x-actor.pos.x,dz=node.z-actor.pos.z,len=Math.hypot(dx,dz);
-  if(len<.001)return;
-  const step=Math.min(speed*dt,len),nx=actor.pos.x+dx/len*step,nz=actor.pos.z+dz/len*step;
-  if(blocked(nx,nz)){actor.path=[];actor.pathIndex=0;actor.pathFailed=true;actor.think=0;return}
-  actor.pos.x=nx;actor.pos.z=nz;actor.group.position.x=nx;actor.group.position.z=nz;
-  actor.group.rotation.y=Math.atan2(dx,dz);
-}
-function deathBroadcast(target){
- const survivor=target.kind==='ally';
- const messages=survivor?[
-  "A survivor's throat was bitten open by something.",
-  'A survivor bled to death.',
-  'A survivor was torn apart by something in the forest.',
-  'A survivor was found dead. Cause unknown.'
- ]:[
-  'The player died of a seizure. Unknown cause.',
-  'The player bled to death.',
-  'Something in the forest bit through the player\'s throat.',
-  'The player was found dead. Cause unknown.'
- ];
- return messages[Math.floor(Math.random()*messages.length)];
-}
-function damage(target,n){
- if(!target.alive)return;
-  target.hp-=n;
- if(target.hp<=0){
-  target.hp=0;target.alive=false;
-  if(target.kind==='ally'){target.respawn=5;target.group.visible=false;notify(deathBroadcast(target),5000)}
-  else if(target.kind==='player'){target.respawn=4;controls.unlock();notify(deathBroadcast(target),5000)}
-  else{target.respawn=12;target.group.visible=false;notify('The Rake is down... for now.')}
- }
 }
 function respawnPlayer(){player.alive=true;player.hp=100;player.attack=0;const spawn=new THREE.Vector3(0,2.05,8);controls.getObject().position.copy(spawn);player.pos=controls.getObject().position;player.respawn=0;controls.getObject().updateMatrixWorld(true);notify('You have respawned!');}
 function notify(t,duration=2300){const n=document.getElementById('notice');n.textContent=t;n.style.display='block';clearTimeout(notify.timer);notify.timer=setTimeout(()=>n.style.display='none',duration)}
