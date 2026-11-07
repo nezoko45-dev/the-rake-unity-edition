@@ -84,7 +84,6 @@ const player={kind:'player',pos:controls.getObject().position,hp:100,maxHp:100,a
 function randomAISpawn(){for(let tries=0;tries<800;tries++){const x=(rand()-.5)*320,z=(rand()-.5)*320;if(Math.hypot(x,z)<18||Math.hypot(x+43,z+43)<10)continue;if(!walkablePoint(x,z))continue;return new THREE.Vector3(x,0,z)}return new THREE.Vector3(70,0,-70)}
 const allies=[];for(let i=0;i<4;i++){const spawn=randomAISpawn();const a=makeActor('ally',spawn.x,spawn.z,[0x536d87,0x89775e,0x677d6a,0x82718c][i]);a.spawn=spawn.clone();allies.push(a)}
 loadRake();
-void 
 // Use paths relative to this module, so GitHub Pages serves the files from
 // /the-rake-unity-edition/Assets/ even when the game is hosted in a subfolder.
 const dayMusic=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url).href);
