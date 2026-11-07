@@ -291,22 +291,18 @@ const activeVibrations=vibrationEvents.filter(v=>
 );
 const livingTargets=[...(player.alive?[player]:[]),...allies.filter(a=>a.alive)];
 let target=null;
-if(activeVibrations.length){
-  // The newest movement from any living actor wins, so a moving survivor
-  // can pull the Rake away from its current target immediately.
-  activeVibrations.sort((a,b)=>b.time-a.time);
-  target=activeVibrations[0].source;
-}
-if(!target&&livingTargets.length){
-  // Patrol between all living targets: nearest by default, then rotate target
-  // every 12 seconds so the Rake visits survivors as well as the player.
-  const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos))[0];
-  if(!rake.patrolTarget||!rake.patrolTarget.alive||elapsed-(rake.patrolSwitchedAt||0)>=12){
-    const others=livingTargets.filter(a=>a!==rake.patrolTarget);
-    rake.patrolTarget=(others.length?others[Math.floor(rand()*others.length)]:nearest);
-    rake.patrolSwitchedAt=elapsed;
-  }
-  target=rake.patrolTarget&&rake.patrolTarget.alive?rake.patrolTarget:nearest;
+// Hunt all living actors. The closest living target gets priority; patrol
+// rotates targets so survivors are actively chased and attacked too.
+if(livingTargets.length){
+ const nearest=[...livingTargets].sort((a,b)=>distance(rake.pos,a.pos)-distance(rake.pos,b.pos))[0];
+ if(!rake.patrolTarget||!rake.patrolTarget.alive||elapsed-(rake.patrolSwitchedAt||0)>=8||distance(rake.pos,rake.patrolTarget.pos)>RAKE_CLOSE_CHASE_RANGE*1.5){
+  const candidates=livingTargets.filter(a=>a!==rake.patrolTarget);
+  rake.patrolTarget=candidates.length?candidates[Math.floor(rand()*candidates.length)]:nearest;
+  rake.patrolSwitchedAt=elapsed;
+ }
+ // Recent sound can redirect the hunt, but only to a living player/survivor.
+ if(activeVibrations.length){activeVibrations.sort((a,b)=>b.time-a.time);const noisy=activeVibrations.find(v=>livingTargets.includes(v.source));if(noisy)target=noisy.source}
+ if(!target)target=rake.patrolTarget?.alive?rake.patrolTarget:nearest;
 }
 if(target){
   if(rake.target!==target){
