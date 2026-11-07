@@ -30,7 +30,7 @@ const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
 function loadModel(i=0){if(i>=paths.length){notice('Monster model failed; refresh after checking Assets.');return}loader.load(paths[i],g=>{template=g.scene;clips=g.animations;spawnMonster();console.log('Loaded reused Rake GLB',paths[i],clips.map(c=>c.name))},undefined,()=>loadModel(i+1))}
 function spawnMonster(){monster=SU.clone(template);monster.scale.setScalar(1.25);monster.position.set(0,0,-36);scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}}
-function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c){action?.fadeOut(.15);action=mixer.clipAction(c);action.reset().fadeIn(.15).play()}}
+let activeClip='';function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c&&c.name!==activeClip){action?.fadeOut(.2);action=mixer.clipAction(c);action.reset().fadeIn(.2).play();activeClip=c.name}}
 const day=new Audio(new URL('../../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.5;
 function playMusic(){day.pause();night.play().catch(()=>{})}
 const player={hp:100};let keys={},started=false,elapsed=0,relayCount=0,enemyState='patrol',lastNoise=0,noisePos=new THREE.Vector3(),enemySpeed=4.3,attackCd=0,gameover=false;
