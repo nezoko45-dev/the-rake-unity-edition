@@ -48,7 +48,7 @@ function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject()
  if(d<18){enemyState='hunt';goal=p;enemySpeed=d<4?6.8:5.8}
  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal=noisePos;enemySpeed=4.8}
  else{enemyState='patrol';const t=elapsed*.22;goal={x:Math.sin(t)*65,z:Math.cos(t*.7)*65};enemySpeed=3.4}
- cellBridgeMove(monster,goal,dt,enemySpeed);
+ const navActor={x:monster.position.x,z:monster.position.z};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;monster.rotation.y=Math.atan2(gx,gz);if(enemyState==='hunt')anim(/run|walk/i);else anim(/walk|idle/i);
  attackCd-=dt;if(d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');if(player.hp<=0){gameover=true;document.querySelector('#overlay').style.display='grid';document.querySelector('#panel').innerHTML='<h1>YOU WERE CAUGHT</h1><button onclick="location.reload()">TRY AGAIN</button>'}}
  document.querySelector('#status').textContent='HUNTER: '+enemyState.toUpperCase(); }
