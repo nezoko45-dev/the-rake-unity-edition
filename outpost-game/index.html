@@ -48,7 +48,8 @@ function cellBridgeMove(actor,goal,dt,speed){const dx=goal.x-actor.x,dz=goal.z-a
 const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a);
 for(let i=0;i<4;i++){const root=new THREE.Group();const body=new THREE.Mesh(new THREE.CapsuleGeometry(.35,.85,4,8),survivorMat);body.position.y=1.05;root.add(body);const head=new THREE.Mesh(new THREE.SphereGeometry(.25,10,8),skinMat);head.position.y=1.75;root.add(head);root.position.set([-5,5,-5,5][i],0,[5,5,-5,-5][i]);scene.add(root);survivors.push({mesh:root,x:root.position.x,z:root.position.z,offset:i*Math.PI/2})}
 function updateSurvivors(dt){const p=controls.getObject().position;for(const a of survivors){const goal={x:p.x+Math.cos(a.offset)*4,z:p.z+Math.sin(a.offset)*4};cellBridgeMove(a,goal,dt,3.8);a.mesh.position.set(a.x,0,a.z);a.mesh.rotation.y=Math.atan2(goal.x-a.x,goal.z-a.z)}}
-\nfunction noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the compound…')}
+
+function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the compound…')}
 function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal;
  // NEW AI: patrol route, noise investigation, line-of-sight chase, search last-known position, then return to patrol.
  if(d<18){enemyState='hunt';goal=p;enemySpeed=d<4?6.8:5.8}
