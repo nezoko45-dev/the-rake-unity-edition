@@ -290,7 +290,7 @@ if(night){
   }
   rake.nightEntered=false;
 }
-if(!night){rake.group.visible=true;rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){moveRakePath(rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
+if(!night){rake.group.visible=true;rakeSpeed=7;rake.target=null;rake.lastSeenCell=null;rake.searchTimer=0;vibrationEvents.length=0;const home={x:RAKE_SPAWN.x,z:RAKE_SPAWN.z};if(distance(rake.pos,home)>2&&(rake.think<=0||!rake.path?.length||rake.pathFailed)){setRakePath(home);rake.think=.8}if(distance(rake.pos,home)>2){setPath(rake,home);movePath(rake,rakeSpeed,dt);updateRakeMovementAnimation()}else{rake.path=[];play(rake,'idle')}floatRakeAboveGround(rake,dt);return}
 /* Basic night chase: movement sounds choose the target, and the Rake
    immediately switches to another moving living actor. */
 const RAKE_HEARING_RANGE=45;
@@ -325,8 +325,7 @@ if(target){
   }
   const targetDistance=distance(rake.pos,target.pos);
   if(targetDistance>2.2){
-    moveRakePath(rakeSpeed,dt);
-    if(rake.actualMoveSpeed<.15)moveRakeToward(goal,rakeSpeed,dt);
+    setPath(rake,goal);movePath(rake,rakeSpeed,dt);
     updateRakeMovementAnimation();
   }else{
     rake.path=[];rake.pathGoal=null;
