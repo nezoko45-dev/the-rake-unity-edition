@@ -32,7 +32,7 @@ const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
 function loadModel(i=0){if(i>=paths.length){notice('Monster model failed; refresh after checking Assets.');return}loader.load(paths[i],g=>{template=g.scene;clips=g.animations;spawnMonster();console.log('Loaded reused Rake GLB',paths[i],clips.map(c=>c.name))},undefined,()=>loadModel(i+1))}
 function spawnMonster(){monster=SU.clone(template);monster.scale.setScalar(1.25);monster.position.set(rakeSpawn.x,0,rakeSpawn.z);scene.add(monster);const bounds=new THREE.Box3().setFromObject(monster);monster.position.y+=Math.max(0,-bounds.min.y)+.04;scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}activeClip=c?.name||'';monsterGroundOffset=monster.position.y;}
-const rakeSpawn={x:0,z:-36};let patrolTarget=null,patrolPickAt=0;const moon=new THREE.PointLight(0x9bbcff,0,80);moon.position.set(0,18,0);scene.add(moon);let activeClip='',monsterGroundOffset=0;function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c&&c.name!==activeClip){action?.fadeOut(.18);action=mixer.clipAction(c);action.reset().fadeIn(.18).play();activeClip=c.name}}
+const rakeSpawn={x:0,z:-36};let patrolTarget=null,patrolPickAt=0,chaseTarget=null,aiCheckAt=0;const aiPositions=new Map();const moon=new THREE.PointLight(0x9bbcff,0,80);moon.position.set(0,18,0);scene.add(moon);let activeClip='',monsterGroundOffset=0;function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c&&c.name!==activeClip){action?.fadeOut(.18);action=mixer.clipAction(c);action.reset().fadeIn(.18).play();activeClip=c.name}}
 let attackAnimUntil=0;function rakeAnimationForState(state,moving,actualSpeed=0){if(elapsed<attackAnimUntil){anim(/attack|hit|bite|kill/i);if(action)action.timeScale=1;return}if(!moving){anim(/idle|stand|breath/i);if(action)action.timeScale=1;return}if(state==='attack'){anim(/attack|hit|bite|kill/i);if(action)action.timeScale=1;return}anim(/walk|walking|patrol|move/i)||anim(/idle/i);if(action)action.timeScale=Math.max(.55,Math.min(2.8,actualSpeed/4.2))}
 const day=new Audio(new URL('../../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.45;let isNight=false;const DAY_LENGTH=150,NIGHT_LENGTH=450;function setPhase(n){if(isNight===n)return;isNight=n;if(n){day.pause();night.play().catch(()=>{});scene.background.set(0x07101b);scene.fog.color.set(0x07101b);hemi.intensity=.45;sun.intensity=.18;moon.intensity=1.1}else{night.pause();day.play().catch(()=>{});scene.background.set(0x8db5d3);scene.fog.color.set(0x8db5d3);hemi.intensity=2.2;sun.intensity=2;moon.intensity=0}}function playMusic(){day.play().catch(()=>{})}
 const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState='patrol',lastNoise=0,noisePos=new THREE.Vector3(),enemySpeed=4.3,attackCd=0,gameover=false;
@@ -58,32 +58,27 @@ function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
 
 function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the forest…')}
 function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
- if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null}
+ if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
-  const living=survivors.filter(a=>a.hp>0&&a.mesh.visible);
-  // Detect and pursue BOTH player and survivor entities; select the nearest detected target.
-  let target=null,targetD=Infinity,targetIsPlayer=false;
-  if(d<70){target={x:p.x,z:p.z};targetD=d;targetIsPlayer=true}
-  for(const a of living){const sd=Math.hypot(a.x-monster.position.x,a.z-monster.position.z);if(sd<85&&sd<targetD){target=a;targetD=sd;targetIsPlayer=false}}
-  if(targetD<2.2){enemyState='attack';goal={x:target.x,z:target.z};enemySpeed=0}
-  else if(target){enemyState=targetIsPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=targetD<4?6.8:5.8}
-  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
-  else{
-   // No entity detected: patrol occupied positions (cells) of the player and survivors.
-   enemyState='patrol-occupied-cells';enemySpeed=3.7;
-   if(!patrolTarget||elapsed>=patrolPickAt||(!survivors.includes(patrolTarget)&&patrolTarget!==p)){
-    const occupied=[{entity:p,x:p.x,z:p.z},...living.map(a=>({entity:a,x:a.x,z:a.z}))];
-    const pick=occupied[Math.floor(rand()*occupied.length)]||{entity:p,x:p.x,z:p.z};
-    patrolTarget=pick.entity;patrolPickAt=elapsed+4+rand()*4;
-   }
-   goal=patrolTarget===p?{x:p.x,z:p.z}:survivors.includes(patrolTarget)?{x:patrolTarget.x,z:patrolTarget.z}:{x:p.x,z:p.z};
+  const living=survivors.filter(a=>a.hp>0&&a.mesh.visible),entities=[{entity:p,x:p.x,z:p.z,isPlayer:true},...living.map(a=>({entity:a,x:a.x,z:a.z,isPlayer:false}))];
+  if(elapsed>=aiCheckAt){
+   const moved=entities.map(e=>{const prev=aiPositions.get(e.entity),movement=prev?Math.hypot(e.x-prev.x,e.z-prev.z):0;aiPositions.set(e.entity,{x:e.x,z:e.z});return {...e,movement}}).filter(e=>e.movement>.15);
+   aiCheckAt=elapsed+11;
+   if(chaseTarget&&!entities.some(e=>e.entity===chaseTarget))chaseTarget=null;
+   if(chaseTarget){const alternatives=moved.filter(e=>e.entity!==chaseTarget);if(alternatives.length){alternatives.sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z));chaseTarget=alternatives[0].entity}}
+   else if(moved.length){moved.sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z));chaseTarget=moved[0].entity}
+   if(moved.length){moved.sort((a,b)=>b.movement-a.movement);patrolTarget=moved[0].entity;patrolPickAt=elapsed+11}
   }
+  const target=entities.find(e=>e.entity===chaseTarget);
+  if(target){const td=Math.hypot(target.x-monster.position.x,target.z-monster.position.z);if(td<2.2){enemyState='attack';goal={x:target.x,z:target.z};enemySpeed=0}else{enemyState=target.isPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=td<4?6.8:5.8}}
+  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
+  else{enemyState='patrol-movement-cells';enemySpeed=3.7;const patrol=entities.find(e=>e.entity===patrolTarget)||entities[0];patrolTarget=patrol.entity;goal={x:patrol.x,z:patrol.z}}
  }
  const navActor={x:monster.position.x,z:monster.position.z};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),moving=frameMove>.025;rakeAnimationForState(enemyState,moving,actualSpeed);
- attackCd-=dt;if(d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
- for(const a of survivors){if(a.hp>0&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<2.2&&elapsed>=a.nextHitAt){a.hp=Math.max(0,a.hp-35);a.nextHitAt=elapsed+1.05;attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(a.hp<=0){a.respawnAt=elapsed+8;a.mesh.visible=false;notice('Survivor '+(a.id+1)+' down! Respawning in 8s')}}}
+ attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
+ for(const a of survivors){if(a.hp>0&&chaseTarget===a&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<2.2&&elapsed>=a.nextHitAt){a.hp=Math.max(0,a.hp-35);a.nextHitAt=elapsed+1.05;attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(a.hp<=0){a.respawnAt=elapsed+8;a.mesh.visible=false;notice('Survivor '+(a.id+1)+' down! Respawning in 8s')}}}
  document.querySelector('#survivor-hud').innerHTML='<b>SURVIVORS</b><br>'+survivors.map(a=>'S'+(a.id+1)+' '+(a.hp>0?a.hp+' HP':'DOWN')).join(' · ');
  document.querySelector('#status').textContent='HUNTER: '+enemyState.toUpperCase(); }
 const clock=new THREE.Clock();function tick(){requestAnimationFrame(tick);const dt=Math.min(clock.getDelta(),.05);if(started&&!gameover){elapsed+=dt;phaseTime+=dt;const phaseDuration=isNight?NIGHT_LENGTH:DAY_LENGTH;if(phaseTime>=phaseDuration){phaseTime=0;setPhase(!isNight)}document.querySelector('#clock').textContent=(isNight?'NIGHT ':'DAY ')+Math.ceil((phaseDuration-phaseTime)/60)+'m';const p=controls.getObject().position;updateChunks();let v=new THREE.Vector3();if(keys.KeyW)v.z-=1;if(keys.KeyS)v.z+=1;if(keys.KeyA)v.x-=1;if(keys.KeyD)v.x+=1;if(v.lengthSq()){v.normalize();const f=new THREE.Vector3();camera.getWorldDirection(f);f.y=0;f.normalize();const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),f);const delta=f.multiplyScalar(-v.z).add(right.multiplyScalar(v.x)).multiplyScalar((keys.ShiftLeft?8:5)*dt);{p.x+=delta.x;p.z+=delta.z;noise(keys.ShiftLeft?2:1)}}updateSurvivors(dt);moveEnemy(dt);if(mixer)mixer.update(dt);document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';document.querySelector('#bar').style.width=player.hp+'%';document.querySelector('#bar').style.background=player.hp<35?'#e34c4c':'#64d68a'}renderer.render(scene,camera)}tick();
