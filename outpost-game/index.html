@@ -104,7 +104,7 @@ function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject()
   else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
   else{enemyState='patrol-movement-cells';enemySpeed=3.7;const patrol=entities.find(e=>e.entity===patrolTarget)||entities[0];patrolTarget=patrol.entity;goal={x:patrol.x,z:patrol.z}}
  }
- const navActor={x:monster.position.x,z:monster.position.z,navState:monster.navState};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.navState=navActor.navState;monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
+ const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),moving=frameMove>.025;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
