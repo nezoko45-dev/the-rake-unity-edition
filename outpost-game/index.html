@@ -63,25 +63,25 @@ function globalCellClear(ix,iz){const p=registerGlobalCell(ix,iz);return !blocke
 function globalRayConnected(a,b){const ka=globalCellKey(a.ix,a.iz),kb=globalCellKey(b.ix,b.iz),key=ka<kb?ka+'|'+kb:kb+'|'+ka;if(globalRayCache.has(key))return globalRayCache.get(key);const clear=bridgeClear(a.x,a.z,b.x,b.z);if(globalRayCache.size>24000)globalRayCache.clear();globalRayCache.set(key,clear);return clear}
 function nearestNavCell(x,z){const c=navCell(x,z);if(globalCellClear(c.x,c.z))return{...c,...navCenter(c.x,c.z)};let best=null,bd=Infinity;for(let r=1;r<=6;r++)for(let ox=-r;ox<=r;ox++)for(let oz=-r;oz<=r;oz++){if(Math.max(Math.abs(ox),Math.abs(oz))!==r)continue;const q=navCenter(c.x+ox,c.z+oz),d=Math.hypot(q.x-x,q.z-z);if(d<bd&&!blocked(q.x,q.z)){best={ix:c.x+ox,iz:c.z+oz,...q};bd=d}}return best||{ix:c.x,iz:c.z,...navCenter(c.x,c.z)}}
 function globalRoute(start,goal){
- // Lightweight homemade connected-cell ray walk. No all-pairs visibility graph or global sort.
+ // BFS through ray-connected adjacent cells; every step is a visible bridge.
  const s=nearestNavCell(start.x,start.z),g=nearestNavCell(goal.x,goal.z);
- if(bridgeClear(start.x,start.z,goal.x,goal.z))return[{x:goal.x,z:goal.z}];
- const route=[],seen=new Set();let cur={ix:s.ix,iz:s.iz,x:s.x,z:s.z};
- for(let step=0;step<180;step++){
-  const ck=globalCellKey(cur.ix,cur.iz);if(seen.has(ck))break;seen.add(ck);
-  let best=null,bestScore=Infinity;
-  for(let ox=-1;ox<=1;ox++)for(let oz=-1;oz<=1;oz++){
-   if(!ox&&!oz)continue;const ix=cur.ix+ox,iz=cur.iz+oz,k=globalCellKey(ix,iz);if(seen.has(k))continue;
-   const p=navCenter(ix,iz);if(blocked(p.x,p.z))continue;const next={ix,iz,x:p.x,z:p.z};
-   if(!globalRayConnected(cur,next))continue;
-   const toGoal=Math.hypot(goal.x-p.x,goal.z-p.z),progress=Math.hypot(cur.x-goal.x,cur.z-goal.z)-toGoal;
-   const score=toGoal+(progress<=0?0:progress*4);
-   if(score<bestScore){bestScore=score;best=next}
+ const startKey=globalCellKey(s.ix,s.iz),goalKey=globalCellKey(g.ix,g.iz);
+ const queue=[{ix:s.ix,iz:s.iz,x:s.x,z:s.z}],came=new Map([[startKey,null]]),nodes=new Map([[startKey,queue[0]]]);
+ let found=null,head=0;
+ while(head<queue.length&&head<9000){
+  const cur=queue[head++],ck=globalCellKey(cur.ix,cur.iz);
+  if(ck===goalKey||bridgeClear(cur.x,cur.z,goal.x,goal.z)){found=ck;break}
+  for(const [ox,oz] of NAV_NEIGHBORS){
+   const ix=cur.ix+ox,iz=cur.iz+oz,k=globalCellKey(ix,iz);if(came.has(k))continue;
+   const p=navCenter(ix,iz);if(blocked(p.x,p.z))continue;
+   const next={ix,iz,x:p.x,z:p.z};if(!globalRayConnected(cur,next))continue;
+   came.set(k,ck);nodes.set(k,next);queue.push(next);
   }
-  if(!best)break;route.push({x:best.x,z:best.z});cur=best;
-  if((cur.ix===g.ix&&cur.iz===g.iz)||bridgeClear(cur.x,cur.z,goal.x,goal.z)){route.push({x:goal.x,z:goal.z});return route}
  }
- return null
+ if(!found)return null;
+ const route=[];let k=found;
+ while(k&&k!==startKey){const n=nodes.get(k);if(!n)break;route.push({x:n.x,z:n.z});k=came.get(k)}
+ route.reverse();route.push({x:goal.x,z:goal.z});return route
 }
 function cellBridgeMove(actor,goal,dt,speed){
  const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);if(dist<.2){actor.navRoute=null;actor.navRouteIndex=0;return}
@@ -91,7 +91,7 @@ function cellBridgeMove(actor,goal,dt,speed){
   actor.navRoute=globalRoute({x:actor.x,z:actor.z},goal);actor.navRouteIndex=0;actor.navRouteGoal=routeGoal;
  }
  let wp=actor.navRoute?.[actor.navRouteIndex];
- if(!wp){if(bridgeClear(actor.x,actor.z,goal.x,goal.z))wp=goal;else{actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt;return}}
+ if(!wp){actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt;return}
  if(navDebug){navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
  const dx=wp.x-actor.x,dz=wp.z-actor.z,l=Math.hypot(dx,dz);if(l<.45){actor.navRouteIndex++;return}
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
@@ -158,7 +158,10 @@ const clock=new THREE.Clock();function tick(){
    v.normalize();const f=new THREE.Vector3();camera.getWorldDirection(f);f.y=0;f.normalize();
    const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),f);
    const delta=f.multiplyScalar(-v.z).add(right.multiplyScalar(v.x)).multiplyScalar((keys.ShiftLeft?8:5)*dt);
-   p.x+=delta.x;p.z+=delta.z;noise(keys.ShiftLeft?2:1);
+   const nx=p.x+delta.x,nz=p.z+delta.z;
+   // Player movement also respects obstacle bridges; no direct clipping through trees/rocks.
+   if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
+   noise(keys.ShiftLeft?2:1);
   }
   navDebugSegments=[];updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
   if(mixer)mixer.update(dt);
