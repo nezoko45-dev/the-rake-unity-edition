@@ -81,7 +81,7 @@ function globalRoute(start,goal){
    const hop=Math.hypot(p.x-cur.x,p.z-cur.z);
    // Reward progress, but allow sideways/backward bridge hops to route around obstacles.
    const progress=Math.hypot(goal.x-cur.x,goal.z-cur.z)-remaining;
-   const score=remaining+hop*.12+(progress<0?Math.abs(progress)*2:0);
+   let score=remaining+hop*.12;if(progress<0)score+=Math.abs(progress)*2;
    if(score<bestScore){bestScore=score;best=next}
   }
   if(!best)return null;
