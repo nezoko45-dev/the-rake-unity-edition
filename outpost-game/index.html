@@ -66,14 +66,18 @@ function cellGraphRoute(actor,goal){
 }
 function cellBridgeMove(actor,goal,dt,speed){
  const g=cellAt(goal.x,goal.z),refresh=actor.navRefresh||0;
- if(!actor.navPath||actor.navGoal!==cellKey(g.x,g.z)||elapsed>=refresh){
-  actor.navPath=cellGraphRoute(actor,goal);actor.navIndex=0;actor.navGoal=cellKey(g.x,g.z);actor.navRefresh=elapsed+.55;
+ if(!actor.navPath||actor.navGoal!==cellKey(g.x,g.z)||elapsed>=refresh||actor.navStuck>1.0){
+  actor.navPath=cellGraphRoute(actor,goal);actor.navIndex=0;actor.navGoal=cellKey(g.x,g.z);actor.navRefresh=elapsed+.35;actor.navStuck=0;
  }
- const path=actor.navPath||[];while(actor.navIndex<path.length-1&&Math.hypot(actor.x-path[actor.navIndex].x,actor.z-path[actor.navIndex].z)<.65)actor.navIndex++;
- let waypoint=path[actor.navIndex]||goal;if(actor.navIndex>=path.length-1&&bridgeClear(actor.x,actor.z,goal.x,goal.z))waypoint=goal;
- const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,l=Math.hypot(dx,dz);if(l<.12)return;
+ const path=actor.navPath||[];while(actor.navIndex<path.length-1&&Math.hypot(actor.x-path[actor.navIndex].x,actor.z-path[actor.navIndex].z)<.8)actor.navIndex++;
+ let waypoint=path[actor.navIndex]||goal;if(actor.navIndex>=path.length-1&&bridgeClear(actor.x,actor.z,goal.x,goal.z)&&!blocked(goal.x,goal.z))waypoint=goal;
+ const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,l=Math.hypot(dx,dz);if(l<.12){actor.navStuck=0;return}
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
- if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz}
+ let moved=false;if(bridgeClear(actor.x,actor.z,nx,nz)&&!blocked(nx,nz)){actor.x=nx;actor.z=nz;moved=true}
+ // Local steering recovery: try angled, shorter steps around an obstruction.
+ if(!moved){for(const turn of [-.75,.75,-1.35,1.35,Math.PI]){const ang=Math.atan2(dz,dx)+turn,ss=Math.min(step,CELL*.22),tx=actor.x+Math.cos(ang)*ss,tz=actor.z+Math.sin(ang)*ss;if(!blocked(tx,tz)&&bridgeClear(actor.x,actor.z,tx,tz)){actor.x=tx;actor.z=tz;moved=true;break}}}
+ actor.navStuck=moved?0:(actor.navStuck||0)+dt;
+ if(moved&&actor.navStuck===0&&actor.navRefresh>elapsed+.2)actor.navRefresh=elapsed+.35;
 }const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
 function limb(parent,material,len,r){const pivot=new THREE.Group();parent.add(pivot);const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r*.72,r,len,8),material);mesh.position.y=-len/2;pivot.add(mesh);return pivot}
 function makeSurvivor(x,z,i){const root=new THREE.Group(),torso=new THREE.Mesh(new THREE.BoxGeometry(.52,.72,.28),survivorMat);torso.position.y=1.25;root.add(torso);const chest=new THREE.Mesh(new THREE.BoxGeometry(.58,.24,.31),gearMat);chest.position.y=1.48;root.add(chest);const head=new THREE.Mesh(new THREE.SphereGeometry(.22,12,10),skinMat);head.position.y=1.82;root.add(head);const neck=new THREE.Mesh(new THREE.CylinderGeometry(.09,.1,.12,8),skinMat);neck.position.y=1.68;root.add(neck);
@@ -81,7 +85,7 @@ const arms=[limb(root,survivorMat,.48,.105),limb(root,survivorMat,.48,.105)],leg
 const hands=[];for(const a of arms){const h=new THREE.Mesh(new THREE.SphereGeometry(.09,8,6),skinMat);h.position.y=-.5;a.add(h);hands.push(h)}scene.add(root);root.position.set(x,0,z);return {id:i,mesh:root,x,z,spawnX:x,spawnZ:z,hp:100,respawnAt:0,nextHitAt:0,arms,legs,phase:i*1.7,target:null,nextPick:0,attack:false}}
 for(let i=0;i<4;i++)survivors.push(makeSurvivor([-8,8,-8,8][i],[8,8,-8,-8][i],i));
 function updateSurvivors(dt){const p=controls.getObject().position;for(const a of survivors){if(a.hp<=0){if(elapsed>=a.respawnAt){a.hp=100;a.x=a.spawnX;a.z=a.spawnZ;a.mesh.visible=true;a.target=null;a.nextPick=elapsed+1;notice('A survivor respawned')}else{a.mesh.visible=false;continue}}const rakeD=Math.hypot(monster?monster.position.x-a.x:999,monster?monster.position.z-a.z:999);a.attack=!!monster&&rakeD<2.8;let moving=false;if(a.attack){a.mesh.rotation.y=Math.atan2(monster.position.x-a.x,monster.position.z-a.z);a.phase+=dt*8;a.arms[0].rotation.x=-1.8+Math.sin(a.phase)*.25;a.arms[1].rotation.x=-1.8-Math.sin(a.phase)*.25;a.legs[0].rotation.x=0;a.legs[1].rotation.x=0}
-else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){const angle=rand()*Math.PI*2,dist=10+rand()*24;a.target={x:a.x+Math.cos(angle)*dist,z:a.z+Math.sin(angle)*dist};a.nextPick=elapsed+6+rand()*8}
+else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){let tx=a.x,tz=a.z;for(let tries=0;tries<14;tries++){const angle=rand()*Math.PI*2,dist=8+rand()*22;tx=a.x+Math.cos(angle)*dist;tz=a.z+Math.sin(angle)*dist;if(!blocked(tx,tz)&&cellGraphRoute(a,{x:tx,z:tz}).length>1)break}a.target={x:tx,z:tz};a.nextPick=elapsed+5+rand()*6}
 const beforeX=a.x,beforeZ=a.z;cellBridgeMove(a,a.target,dt,randWalkSpeed(a));moving=Math.hypot(a.x-beforeX,a.z-beforeZ)>.002;if(moving)a.mesh.rotation.y=Math.atan2(a.target.x-a.x,a.target.z-a.z);a.phase+=dt*(moving?7:2);const swing=moving?Math.sin(a.phase)*.65:Math.sin(a.phase)*.04;a.legs[0].rotation.x=swing;a.legs[1].rotation.x=-swing;a.arms[0].rotation.x=-swing*.7;a.arms[1].rotation.x=swing*.7}
 a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)}}
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
