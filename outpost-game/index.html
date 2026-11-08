@@ -41,7 +41,7 @@ let attackAnimUntil=0;function rakeAnimationForState(state,moving,actualSpeed=0)
  if(moveClip&&moveClip.name!==activeClip){action?.fadeOut(.12);action=mixer.clipAction(moveClip);action.reset().fadeIn(.12).play();activeClip=moveClip.name}
  if(action){action.enabled=true;action.timeScale=running?1.15:1}
 }
-const day=new Audio(new URL('../../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.45;let isNight=false;const DAY_LENGTH=150,NIGHT_LENGTH=450;function setPhase(n){if(isNight===n)return;isNight=n;if(n){day.pause();night.play().catch(()=>{});scene.background.set(0x07101b);scene.fog.color.set(0x07101b);hemi.intensity=.45;sun.intensity=.18;moon.intensity=1.1}else{night.pause();day.play().catch(()=>{});scene.background.set(0x8db5d3);scene.fog.color.set(0x8db5d3);hemi.intensity=2.2;sun.intensity=2;moon.intensity=0}}function playMusic(){day.play().catch(()=>{})}
+const day=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.45;let isNight=false;const DAY_LENGTH=150,NIGHT_LENGTH=450;function setPhase(n){if(isNight===n)return;isNight=n;if(n){day.pause();night.play().catch(()=>{});scene.background.set(0x07101b);scene.fog.color.set(0x07101b);hemi.intensity=.45;sun.intensity=.18;moon.intensity=1.1}else{night.pause();day.play().catch(()=>{});scene.background.set(0x8db5d3);scene.fog.color.set(0x8db5d3);hemi.intensity=2.2;sun.intensity=2;moon.intensity=0}}function playMusic(){day.play().catch(()=>{})}
 const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState='patrol',lastNoise=0,noisePos=new THREE.Vector3(),enemySpeed=4.3,attackCd=0,gameover=false;
 addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?90:0}if(e.code==='KeyG'){navDebug=!navDebug;notice('Navigation ray gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
 function drawNavDebug(){navDebugGroup.clear();if(!navDebug){navDebugSegments=[];return}const positions=[],colors=[];for(let i=0;i<navDebugSegments.length;i+=7){positions.push(navDebugSegments[i],navDebugSegments[i+1],navDebugSegments[i+2],navDebugSegments[i+3],navDebugSegments[i+4],navDebugSegments[i+5]);const k=navDebugSegments[i+6],col=k===0?[.15,1,.25]:k===1?[1,.12,.12]:[1,.8,.08];colors.push(...col,...col)}navDebugSegments=[];if(!positions.length)return;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));const m=new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.9});navDebugGroup.add(new THREE.LineSegments(g,m))}
@@ -51,12 +51,12 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 // Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
 // Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
 let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-updateChunks();
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
+updateChunks();
 function globalCellKey(x,z){return x+','+z}
 function registerGlobalCell(ix,iz){const k=globalCellKey(ix,iz);if(!globalNavCells.has(k))globalNavCells.set(k,navCenter(ix,iz));return globalNavCells.get(k)}
 function globalCellClear(ix,iz){const p=registerGlobalCell(ix,iz);return !blocked(p.x,p.z)}
