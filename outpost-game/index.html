@@ -53,7 +53,7 @@ function drawNavDebug(){
  if(elapsed>=navDebugRefresh){
   navDebugSegments=[];
   navDebugRefresh=elapsed+.35;
-  const p=controls.getObject().position,base=navCell(p.x,p.z),range=9;
+  const p=controls.getObject().position,base=navCell(p.x,p.z),range=5;
   const offsets=[[1,0],[0,1],[1,1],[1,-1]];
   for(let ix=base.x-range;ix<=base.x+range;ix++)for(let iz=base.z-range;iz<=base.z+range;iz++){
    const a=navCenter(ix,iz);if(blocked(a.x,a.z))continue;
@@ -125,7 +125,7 @@ function cellBridgeMove(actor,goal,dt,speed){
  let waypoint=actor.navBridgeTarget;
  if(!waypoint||Math.hypot(actor.x-waypoint.x,actor.z-waypoint.z)<.45||blocked(waypoint.x,waypoint.z)||!bridgeClear(actor.x,actor.z,waypoint.x,waypoint.z)){
   let best=null,bestScore=Infinity;
-  for(let radius=1;radius<=7;radius++)for(let ox=-radius;ox<=radius;ox++)for(let oz=-radius;oz<=radius;oz++){
+  for(let radius=1;radius<=1;radius++)for(let ox=-radius;ox<=radius;ox++)for(let oz=-radius;oz<=radius;oz++){
    if(Math.max(Math.abs(ox),Math.abs(oz))!==radius)continue;
    const q=navCenter(here.x+ox,here.z+oz);if(blocked(q.x,q.z)||!bridgeClear(center.x,center.z,q.x,q.z)||!bridgeClear(actor.x,actor.z,q.x,q.z))continue;
    const remaining=Math.hypot(goal.x-q.x,goal.z-q.z),hop=Math.hypot(q.x-actor.x,q.z-actor.z);
