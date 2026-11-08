@@ -98,7 +98,13 @@ function cellBridgeMove(actor,goal,dt,speed){
   actor.navRoute=globalRoute({x:actor.x,z:actor.z},goal);actor.navRouteIndex=0;actor.navRouteGoal=routeGoal;
  }
  let wp=actor.navRoute?.[actor.navRouteIndex];
- if(!wp){actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt;return}
+ if(!wp){
+  // Recover by taking a clear bridge hop to the best neighboring cell.
+  const here=nearestNavCell(actor.x,actor.z);let hop=null,score=Infinity;
+  for(const [ox,oz] of NAV_NEIGHBORS){const q=navCenter(here.ix+ox,here.iz+oz);if(blocked(q.x,q.z)||!bridgeClear(actor.x,actor.z,q.x,q.z))continue;const s=Math.hypot(goal.x-q.x,goal.z-q.z);if(s<score){score=s;hop=q}}
+  if(!hop){actor.navStuck=(actor.navStuck||0)+dt;return}
+  wp=hop;actor.navRoute=[wp];actor.navRouteIndex=0;
+}
  if(navDebug){navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
  const dx=wp.x-actor.x,dz=wp.z-actor.z,l=Math.hypot(dx,dz);if(l<.45){actor.navRouteIndex++;return}
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
@@ -111,7 +117,7 @@ const arms=[limb(root,survivorMat,.48,.105),limb(root,survivorMat,.48,.105)],leg
 const hands=[];for(const a of arms){const h=new THREE.Mesh(new THREE.SphereGeometry(.09,8,6),skinMat);h.position.y=-.5;a.add(h);hands.push(h)}scene.add(root);root.position.set(x,0,z);return {id:i,mesh:root,x,z,spawnX:x,spawnZ:z,hp:100,respawnAt:0,nextHitAt:0,arms,legs,phase:i*1.7,target:null,nextPick:0,attack:false}}
 for(let i=0;i<4;i++)survivors.push(makeSurvivor([-8,8,-8,8][i],[8,8,-8,-8][i],i));
 function updateSurvivors(dt){const p=controls.getObject().position;for(const a of survivors){if(a.hp<=0){if(elapsed>=a.respawnAt){a.hp=100;a.x=a.spawnX;a.z=a.spawnZ;a.mesh.visible=true;a.target=null;a.nextPick=elapsed+1;notice('A survivor respawned')}else{a.mesh.visible=false;continue}}const rakeD=Math.hypot(monster?monster.position.x-a.x:999,monster?monster.position.z-a.z:999);a.attack=!!monster&&rakeD<2.8;let moving=false;if(a.attack){a.mesh.rotation.y=Math.atan2(monster.position.x-a.x,monster.position.z-a.z);a.phase+=dt*8;a.arms[0].rotation.x=-1.8+Math.sin(a.phase)*.25;a.arms[1].rotation.x=-1.8-Math.sin(a.phase)*.25;a.legs[0].rotation.x=0;a.legs[1].rotation.x=0}
-else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){let tx=a.x,tz=a.z;for(let tries=0;tries<14;tries++){const angle=rand()*Math.PI*2,dist=8+rand()*22;tx=a.x+Math.cos(angle)*dist;tz=a.z+Math.sin(angle)*dist;if(!blocked(tx,tz)&&bridgeClear(a.x,a.z,tx,tz))break}a.target={x:tx,z:tz};a.nextPick=elapsed+5+rand()*6}
+else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){let tx=a.x,tz=a.z;for(let tries=0;tries<14;tries++){const angle=rand()*Math.PI*2,dist=8+rand()*22;tx=a.x+Math.cos(angle)*dist;tz=a.z+Math.sin(angle)*dist;if(!blocked(tx,tz))break}a.target={x:tx,z:tz};a.nextPick=elapsed+5+rand()*6}
 const beforeX=a.x,beforeZ=a.z;cellBridgeMove(a,a.target,dt,randWalkSpeed(a));moving=Math.hypot(a.x-beforeX,a.z-beforeZ)>.002;if(moving)a.mesh.rotation.y=Math.atan2(a.target.x-a.x,a.target.z-a.z);a.phase+=dt*(moving?7:2);const swing=moving?Math.sin(a.phase)*.65:Math.sin(a.phase)*.04;a.legs[0].rotation.x=swing;a.legs[1].rotation.x=-swing;a.arms[0].rotation.x=-swing*.7;a.arms[1].rotation.x=swing*.7}
 a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)}}
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
