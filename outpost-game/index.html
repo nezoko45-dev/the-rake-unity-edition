@@ -63,25 +63,31 @@ function globalCellClear(ix,iz){const p=registerGlobalCell(ix,iz);return !blocke
 function globalRayConnected(a,b){const ka=globalCellKey(a.ix,a.iz),kb=globalCellKey(b.ix,b.iz),key=ka<kb?ka+'|'+kb:kb+'|'+ka;if(globalRayCache.has(key))return globalRayCache.get(key);const clear=bridgeClear(a.x,a.z,b.x,b.z);if(globalRayCache.size>24000)globalRayCache.clear();globalRayCache.set(key,clear);return clear}
 function nearestNavCell(x,z){const c=navCell(x,z);if(globalCellClear(c.x,c.z))return{...c,...navCenter(c.x,c.z)};let best=null,bd=Infinity;for(let r=1;r<=6;r++)for(let ox=-r;ox<=r;ox++)for(let oz=-r;oz<=r;oz++){if(Math.max(Math.abs(ox),Math.abs(oz))!==r)continue;const q=navCenter(c.x+ox,c.z+oz),d=Math.hypot(q.x-x,q.z-z);if(d<bd&&!blocked(q.x,q.z)){best={ix:c.x+ox,iz:c.z+oz,...q};bd=d}}return best||{ix:c.x,iz:c.z,...navCenter(c.x,c.z)}}
 function globalRoute(start,goal){
- // BFS through ray-connected adjacent cells; every step is a visible bridge.
+ // Simple bridge-cell navigation: ray-connect each nearby cell to visible cells,
+ // then greedily follow the visible bridge that makes the most progress.
  const s=nearestNavCell(start.x,start.z),g=nearestNavCell(goal.x,goal.z);
- const startKey=globalCellKey(s.ix,s.iz),goalKey=globalCellKey(g.ix,g.iz);
- const queue=[{ix:s.ix,iz:s.iz,x:s.x,z:s.z}],came=new Map([[startKey,null]]),nodes=new Map([[startKey,queue[0]]]);
- let found=null,head=0;
- while(head<queue.length&&head<9000){
-  const cur=queue[head++],ck=globalCellKey(cur.ix,cur.iz);
-  if(ck===goalKey||bridgeClear(cur.x,cur.z,goal.x,goal.z)){found=ck;break}
-  for(const [ox,oz] of NAV_NEIGHBORS){
-   const ix=cur.ix+ox,iz=cur.iz+oz,k=globalCellKey(ix,iz);if(came.has(k))continue;
+ const route=[],seen=new Set();let cur={ix:s.ix,iz:s.iz,x:s.x,z:s.z};
+ for(let step=0;step<240;step++){
+  const ck=globalCellKey(cur.ix,cur.iz);if(seen.has(ck))return null;seen.add(ck);
+  if(cur.ix===g.ix&&cur.iz===g.iz){route.push({x:goal.x,z:goal.z});return route}
+  let best=null,bestScore=Infinity;
+  // Search the surrounding bridge-cell field; every candidate is ray-tested.
+  for(let radius=1;radius<=8;radius++)for(let ox=-radius;ox<=radius;ox++)for(let oz=-radius;oz<=radius;oz++){
+   if(Math.max(Math.abs(ox),Math.abs(oz))!==radius)continue;
+   const ix=cur.ix+ox,iz=cur.iz+oz,k=globalCellKey(ix,iz);if(seen.has(k))continue;
    const p=navCenter(ix,iz);if(blocked(p.x,p.z))continue;
    const next={ix,iz,x:p.x,z:p.z};if(!globalRayConnected(cur,next))continue;
-   came.set(k,ck);nodes.set(k,next);queue.push(next);
+   const distGoal=Math.hypot(goal.x-p.x,goal.z-p.z);
+   const distCur=Math.hypot(goal.x-cur.x,goal.z-cur.z);
+   if(distGoal>=distCur-.05)continue;
+   const score=distGoal+Math.hypot(p.x-cur.x,p.z-cur.z)*.08;
+   if(score<bestScore){bestScore=score;best=next}
   }
+  if(!best){if(bridgeClear(cur.x,cur.z,goal.x,goal.z)){route.push({x:goal.x,z:goal.z});return route}return null}
+  route.push({x:best.x,z:best.z});cur=best;
+  if(bridgeClear(cur.x,cur.z,goal.x,goal.z)){route.push({x:goal.x,z:goal.z});return route}
  }
- if(!found)return null;
- const route=[];let k=found;
- while(k&&k!==startKey){const n=nodes.get(k);if(!n)break;route.push({x:n.x,z:n.z});k=came.get(k)}
- route.reverse();route.push({x:goal.x,z:goal.z});return route
+ return null
 }
 function cellBridgeMove(actor,goal,dt,speed){
  const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);if(dist<.2){actor.navRoute=null;actor.navRouteIndex=0;return}
