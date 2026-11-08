@@ -27,10 +27,10 @@ for(let i=0;i<5;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK
 chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs);for(let ix=Math.floor(cx*CHUNK/NAV_CELL);ix<=Math.ceil((cx+1)*CHUNK/NAV_CELL);ix+=3)for(let iz=Math.floor(cz*CHUNK/NAV_CELL);iz<=Math.ceil((cz+1)*CHUNK/NAV_CELL);iz+=3)registerGlobalCell(ix,iz)}
 function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let ix=Math.floor((cx*CHUNK-CHUNK/2)/NAV_CELL);ix<=Math.ceil((cx*CHUNK+CHUNK/2)/NAV_CELL);ix+=3)for(let iz=Math.floor((cz*CHUNK-CHUNK/2)/NAV_CELL);iz<=Math.ceil((cz*CHUNK+CHUNK/2)/NAV_CELL);iz+=3)registerGlobalCell(ix,iz);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}for(let ix=Math.floor(c.cx*CHUNK/NAV_CELL);ix<=Math.ceil((c.cx+1)*CHUNK/NAV_CELL);ix+=3)for(let iz=Math.floor(c.cz*CHUNK/NAV_CELL);iz<=Math.ceil((c.cz+1)*CHUNK/NAV_CELL);iz+=3)globalNavCells.delete(globalCellKey(ix,iz));chunkMap.delete(key);globalRayCache.clear()}}}
 const flashlight=new THREE.SpotLight(0xe4f0ff,0,42,Math.PI/9,.32,1.15);flashlight.position.set(0,-.08,-.18);camera.add(flashlight);const ft=new THREE.Object3D();ft.position.set(0,0,-12);camera.add(ft);flashlight.target=ft;let lightOn=false;
-const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null,action=null;
+const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null,action=null,headBone=null,headBaseY=0;
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
 function loadModel(i=0){if(i>=paths.length){notice('Monster model failed; refresh after checking Assets.');return}loader.load(paths[i],g=>{template=g.scene;clips=g.animations;spawnMonster();console.log('Loaded reused Rake GLB',paths[i],clips.map(c=>c.name))},undefined,()=>loadModel(i+1))}
-function spawnMonster(){monster=SU.clone(template);monster.scale.setScalar(1.25);monster.position.set(rakeSpawn.x,0,rakeSpawn.z);scene.add(monster);const bounds=new THREE.Box3().setFromObject(monster);monster.position.y+=Math.max(0,-bounds.min.y)+.85;scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}activeClip=c?.name||'';monsterGroundOffset=monster.position.y;}
+function spawnMonster(){monster=SU.clone(template);headBone=null;monster.traverse(o=>{if(o.isBone&&/head|skull/i.test(o.name)&&!headBone)headBone=o});if(headBone)headBaseY=headBone.rotation.y;monster.scale.setScalar(1.25);monster.position.set(rakeSpawn.x,0,rakeSpawn.z);scene.add(monster);const bounds=new THREE.Box3().setFromObject(monster);monster.position.y+=Math.max(0,-bounds.min.y)+.85;scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}activeClip=c?.name||'';monsterGroundOffset=monster.position.y;}
 const rakeSpawn={x:0,z:-36};let patrolTarget=null,patrolPickAt=0,chaseTarget=null,aiCheckAt=0;const aiPositions=new Map();const moon=new THREE.PointLight(0x9bbcff,0,80);moon.position.set(0,18,0);scene.add(moon);let activeClip='',monsterGroundOffset=0;function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c&&c.name!==activeClip){action?.fadeOut(.18);action=mixer.clipAction(c);action.reset().fadeIn(.18).play();activeClip=c.name}}
 let attackAnimUntil=0;function rakeAnimationForState(state,moving,actualSpeed=0){
  if(elapsed<attackAnimUntil||state==='attack'){anim(/attack|hit|bite|kill/i);if(action)action.timeScale=1;return}
@@ -154,6 +154,18 @@ a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
 
 function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the forest…')}
+function updateRakeHeadLook(dt){
+ if(!monster||!headBone)return;
+ const p=controls.getObject().position;
+ let target={x:p.x,z:p.z},best=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);
+ for(const s of survivors){if(s.hp<=0||!s.mesh.visible)continue;const d=Math.hypot(s.x-monster.position.x,s.z-monster.position.z);if(d<best){best=d;target={x:s.x,z:s.z}}}
+ if(best>20){headBone.rotation.y=THREE.MathUtils.damp(headBone.rotation.y,headBaseY,5,dt);return}
+ const worldYaw=Math.atan2(target.x-monster.position.x,target.z-monster.position.z);
+ let relative=worldYaw-monster.rotation.y;relative=Math.atan2(Math.sin(relative),Math.cos(relative));
+ // Limit head turn to a natural side-to-side range while retaining the model's base pose.
+ const desired=headBaseY+THREE.MathUtils.clamp(relative,-.85,.85);
+ headBone.rotation.y=THREE.MathUtils.damp(headBone.rotation.y,desired,7,dt);
+}
 function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
@@ -208,7 +220,7 @@ const clock=new THREE.Clock();function tick(){
    noise(keys.ShiftLeft?2:1);
   }
   navDebugSegments=[];updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
-  if(mixer)mixer.update(dt);
+  if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';
   document.querySelector('#bar').style.width=player.hp+'%';
   document.querySelector('#bar').style.background=player.hp<35?'#e34c4c':'#64d68a';
