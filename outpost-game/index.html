@@ -63,24 +63,25 @@ function globalCellClear(ix,iz){const p=registerGlobalCell(ix,iz);return !blocke
 function globalRayConnected(a,b){const ka=globalCellKey(a.ix,a.iz),kb=globalCellKey(b.ix,b.iz),key=ka<kb?ka+'|'+kb:kb+'|'+ka;if(globalRayCache.has(key))return globalRayCache.get(key);const clear=bridgeClear(a.x,a.z,b.x,b.z);if(globalRayCache.size>24000)globalRayCache.clear();globalRayCache.set(key,clear);return clear}
 function nearestNavCell(x,z){const c=navCell(x,z);if(globalCellClear(c.x,c.z))return{...c,...navCenter(c.x,c.z)};let best=null,bd=Infinity;for(let r=1;r<=6;r++)for(let ox=-r;ox<=r;ox++)for(let oz=-r;oz<=r;oz++){if(Math.max(Math.abs(ox),Math.abs(oz))!==r)continue;const q=navCenter(c.x+ox,c.z+oz),d=Math.hypot(q.x-x,q.z-z);if(d<bd&&!blocked(q.x,q.z)){best={ix:c.x+ox,iz:c.z+oz,...q};bd=d}}return best||{ix:c.x,iz:c.z,...navCenter(c.x,c.z)}}
 function globalRoute(start,goal){
- // Homemade visibility graph: ray-test each visible registered cell, then walk its connected ray edges.
+ // Lightweight homemade connected-cell ray walk. No all-pairs visibility graph or global sort.
  const s=nearestNavCell(start.x,start.z),g=nearestNavCell(goal.x,goal.z);
  if(bridgeClear(start.x,start.z,goal.x,goal.z))return[{x:goal.x,z:goal.z}];
- const nodes=new Map(globalNavCells);nodes.set(globalCellKey(s.ix,s.iz),{x:s.x,z:s.z});nodes.set(globalCellKey(g.ix,g.iz),{x:g.x,z:g.z});
- const open=[{ix:s.ix,iz:s.iz,x:s.x,z:s.z}],came=new Map(),cost=new Map([[globalCellKey(s.ix,s.iz),0]]),closed=new Set(),goalKey=globalCellKey(g.ix,g.iz);
- // Expand each cell's full visible-cell neighborhood (not only adjacent grid cells).
- while(open.length){
-  open.sort((a,b)=>(cost.get(globalCellKey(a.ix,a.iz))+Math.hypot(a.x-g.x,a.z-g.z))-(cost.get(globalCellKey(b.ix,b.iz))+Math.hypot(b.x-g.x,b.z-g.z)));
-  const cur=open.shift(),ck=globalCellKey(cur.ix,cur.iz);if(closed.has(ck))continue;if(ck===goalKey)break;closed.add(ck);
-  for(const [nk,np] of nodes){
-   if(nk===ck||closed.has(nk)||blocked(np.x,np.z))continue;
-   const [ix,iz]=nk.split(',').map(Number),next={ix,iz,x:np.x,z:np.z};
+ const route=[],seen=new Set();let cur={ix:s.ix,iz:s.iz,x:s.x,z:s.z};
+ for(let step=0;step<180;step++){
+  const ck=globalCellKey(cur.ix,cur.iz);if(seen.has(ck))break;seen.add(ck);
+  let best=null,bestScore=Infinity;
+  for(let ox=-1;ox<=1;ox++)for(let oz=-1;oz<=1;oz++){
+   if(!ox&&!oz)continue;const ix=cur.ix+ox,iz=cur.iz+oz,k=globalCellKey(ix,iz);if(seen.has(k))continue;
+   const p=navCenter(ix,iz);if(blocked(p.x,p.z))continue;const next={ix,iz,x:p.x,z:p.z};
    if(!globalRayConnected(cur,next))continue;
-   const nc=cost.get(ck)+Math.hypot(next.x-cur.x,next.z-cur.z);
-   if(nc<(cost.get(nk)??Infinity)){cost.set(nk,nc);came.set(nk,ck);if(!open.some(v=>globalCellKey(v.ix,v.iz)===nk))open.push(next)}
+   const toGoal=Math.hypot(goal.x-p.x,goal.z-p.z),progress=Math.hypot(cur.x-goal.x,cur.z-goal.z)-toGoal;
+   const score=toGoal+(progress<=0?0:progress*4);
+   if(score<bestScore){bestScore=score;best=next}
   }
+  if(!best)break;route.push({x:best.x,z:best.z});cur=best;
+  if((cur.ix===g.ix&&cur.iz===g.iz)||bridgeClear(cur.x,cur.z,goal.x,goal.z)){route.push({x:goal.x,z:goal.z});return route}
  }
- if(!came.has(goalKey))return null;const route=[];let k=goalKey;while(k!==globalCellKey(s.ix,s.iz)){const n=nodes.get(k);if(!n)return null;route.push({x:n.x,z:n.z});k=came.get(k);if(!k)return null}route.reverse();route.push({x:goal.x,z:goal.z});return route
+ return null
 }
 function cellBridgeMove(actor,goal,dt,speed){
  const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);if(dist<.2){actor.navRoute=null;actor.navRouteIndex=0;return}
