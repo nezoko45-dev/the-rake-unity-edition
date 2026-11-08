@@ -160,14 +160,15 @@ function updateRakeHeadLook(dt){
  const p=controls.getObject().position;
  let target={x:p.x,z:p.z},best=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);
  for(const s of survivors){if(s.hp<=0||!s.mesh.visible)continue;const d=Math.hypot(s.x-monster.position.x,s.z-monster.position.z);if(d<best){best=d;target={x:s.x,z:s.z}}}
- if(best>20){headBone.rotation.y=THREE.MathUtils.damp(headBone.rotation.y,headBaseY,5,dt);return}
- const worldYaw=Math.atan2(target.x-monster.position.x,target.z-monster.position.z);
- let relative=worldYaw-monster.rotation.y;relative=Math.atan2(Math.sin(relative),Math.cos(relative));
- // Limit head turn to a natural side-to-side range while retaining the model's base pose.
- const desired=headBaseY+THREE.MathUtils.clamp(relative,-.85,.85);
- headBone.rotation.y=THREE.MathUtils.damp(headBone.rotation.y,desired,7,dt);
-}
-function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
+ // Rotate around the model's vertical axis in WORLD space, then convert back to the bone's local space.
+ monster.updateMatrixWorld(true);headBone.parent?.updateMatrixWorld(true);
+ const boneWorld=new THREE.Vector3();headBone.getWorldPosition(boneWorld);
+ const parentWorldYaw=headBone.parent?new THREE.Euler().setFromQuaternion(headBone.parent.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y:monster.rotation.y;
+ const base=headBaseY;
+ let desired=base;
+ if(best<=28){const worldYaw=Math.atan2(target.x-boneWorld.x,target.z-boneWorld.z);let relative=worldYaw-parentWorldYaw;relative=Math.atan2(Math.sin(relative),Math.cos(relative));desired=base+THREE.MathUtils.clamp(relative,-1.25,1.25)}
+ headBone.rotation.y=THREE.MathUtils.damp(headBone.rotation.y,desired,9,dt);
+}function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
   const living=survivors.filter(a=>a.hp>0&&a.mesh.visible),entities=[{entity:p,x:p.x,z:p.z,isPlayer:true},...living.map(a=>({entity:a,x:a.x,z:a.z,isPlayer:false}))];
