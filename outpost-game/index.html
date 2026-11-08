@@ -168,7 +168,7 @@ function updateRakeHeadLook(dt){
  headBone.userData.trackYaw=THREE.MathUtils.damp(headBone.userData.trackYaw||0,offset,9,dt);
  // Three.js mixer updates bone.quaternion before this; layer a local-Y offset after animation.
  const q=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),headBone.userData.trackYaw);
- headBone.quaternion.multiply(q);
+ headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
@@ -223,7 +223,7 @@ const clock=new THREE.Clock();function tick(){
    noise(keys.ShiftLeft?2:1);
   }
   navDebugSegments=[];updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
-  if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
+  if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';
   document.querySelector('#bar').style.width=player.hp+'%';
   document.querySelector('#bar').style.background=player.hp<35?'#e34c4c':'#64d68a';
