@@ -49,14 +49,27 @@ function notice(t){const n=document.querySelector('#notice');n.textContent=t;n.s
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 
 // Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
-const CELL=3.0, CELL_DIRS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-// Homemade ray-steering navigation (no graph search or queued route).
+// Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
+const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
+function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
+function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
 function cellBridgeMove(actor,goal,dt,speed){
- const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);if(dist<.15){actor.navStuck=0;return}
- const step=Math.min(speed*dt,dist),base=Math.atan2(dz,dx),angles=[0,.28,-.28,.58,-.58,.95,-.95,1.35,-1.35,1.8,-1.8,Math.PI];let best=null,bestScore=-Infinity;
- for(const turn of angles){const ang=base+turn,nx=actor.x+Math.cos(ang)*step,nz=actor.z+Math.sin(ang)*step;if(blocked(nx,nz)||!bridgeClear(actor.x,actor.z,nx,nz))continue;const remain=Math.hypot(goal.x-nx,goal.z-nz);let clearance=0;for(const probe of [.45,.9,1.35])if(!blocked(actor.x+Math.cos(ang)*probe,actor.z+Math.sin(ang)*probe))clearance++;const score=(dist-remain)*4+clearance*.08-Math.abs(turn)*.035;if(score>bestScore){bestScore=score;best={x:nx,z:nz}}}
- if(best){actor.x=best.x;actor.z=best.z;actor.navStuck=0}else actor.navStuck=(actor.navStuck||0)+dt;
+ const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);if(dist<.2){actor.navStuck=0;return}
+ const here=navCell(actor.x,actor.z),center=navCenter(here.x,here.z);
+ if(!actor.navCellGoal||actor.navGoalX!==Math.floor(goal.x/NAV_CELL)||actor.navGoalZ!==Math.floor(goal.z/NAV_CELL)||Math.hypot(actor.navCellGoal.x-actor.x,actor.navCellGoal.z-actor.z)<.65||!bridgeClear(actor.x,actor.z,actor.navCellGoal.x,actor.navCellGoal.z)){
+  actor.navGoalX=Math.floor(goal.x/NAV_CELL);actor.navGoalZ=Math.floor(goal.z/NAV_CELL);
+  const visited=actor.navVisited||(actor.navVisited=[]);visited.push(here.x+','+here.z);if(visited.length>12)visited.shift();
+  let best=null,bestScore=Infinity;
+  for(const [ox,oz] of NAV_NEIGHBORS){const ix=here.x+ox,iz=here.z+oz,q=navCenter(ix,iz);if(blocked(q.x,q.z)||!bridgeClear(center.x,center.z,q.x,q.z))continue;
+   const score=Math.hypot(goal.x-q.x,goal.z-q.z)+(visited.includes(ix+','+iz)?NAV_CELL*2.2:0)+Math.hypot(q.x-actor.x,q.z-actor.z)*.08;
+   if(score<bestScore){bestScore=score;best=q}
+  }
+  actor.navCellGoal=best||goal;
+ }
+ const wp=actor.navCellGoal,dx=wp.x-actor.x,dz=wp.z-actor.z,l=Math.hypot(dx,dz),step=Math.min(speed*dt,l);if(l<.08)return;
+ const nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
+ if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.navStuck=0}else{actor.navCellGoal=null;actor.navStuck=(actor.navStuck||0)+dt}
 }
 const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
 function limb(parent,material,len,r){const pivot=new THREE.Group();parent.add(pivot);const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r*.72,r,len,8),material);mesh.position.y=-len/2;pivot.add(mesh);return pivot}
