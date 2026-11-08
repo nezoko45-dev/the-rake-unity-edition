@@ -57,24 +57,33 @@ a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
 
 function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the forest…')}
-function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal;
+function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null}
- else if(d<2.15){enemyState='attack';goal=p;enemySpeed=0}
- else {
-  // Survivors take priority over the player except when the Rake is already attacking the player.
+ else{
   const living=survivors.filter(a=>a.hp>0&&a.mesh.visible);
-  let victim=null,victimD=Infinity;
-  for(const a of living){const sd=Math.hypot(a.x-monster.position.x,a.z-monster.position.z);if(sd<victimD){victimD=sd;victim=a}}
-  if(victim&&victimD<85){enemyState='hunt-survivor';patrolTarget=victim;goal={x:victim.x,z:victim.z};enemySpeed=victimD<4?6.4:5.8}
-  else if(d<18){enemyState='hunt';goal=p;enemySpeed=d<4?6.8:5.8}
-  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal=noisePos;enemySpeed=4.8}
-  else{enemyState='patrol';enemySpeed=3.7;if(!patrolTarget||!survivors.includes(patrolTarget)||patrolTarget.hp<=0||elapsed>=patrolPickAt){const targets=living.filter(a=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)>2.5);patrolTarget=targets.length?targets[Math.floor(rand()*targets.length)]:{x:p.x,z:p.z};patrolPickAt=elapsed+5+rand()*2}goal=survivors.includes(patrolTarget)?{x:patrolTarget.x,z:patrolTarget.z}:patrolTarget}
+  // Detect and pursue BOTH player and survivor entities; select the nearest detected target.
+  let target=null,targetD=Infinity,targetIsPlayer=false;
+  if(d<70){target={x:p.x,z:p.z};targetD=d;targetIsPlayer=true}
+  for(const a of living){const sd=Math.hypot(a.x-monster.position.x,a.z-monster.position.z);if(sd<85&&sd<targetD){target=a;targetD=sd;targetIsPlayer=false}}
+  if(targetD<2.2){enemyState='attack';goal={x:target.x,z:target.z};enemySpeed=0}
+  else if(target){enemyState=targetIsPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=targetD<4?6.8:5.8}
+  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
+  else{
+   // No entity detected: patrol occupied positions (cells) of the player and survivors.
+   enemyState='patrol-occupied-cells';enemySpeed=3.7;
+   if(!patrolTarget||elapsed>=patrolPickAt||(!survivors.includes(patrolTarget)&&patrolTarget!==p)){
+    const occupied=[{entity:p,x:p.x,z:p.z},...living.map(a=>({entity:a,x:a.x,z:a.z}))];
+    const pick=occupied[Math.floor(rand()*occupied.length)]||{entity:p,x:p.x,z:p.z};
+    patrolTarget=pick.entity;patrolPickAt=elapsed+4+rand()*4;
+   }
+   goal=patrolTarget===p?{x:p.x,z:p.z}:survivors.includes(patrolTarget)?{x:patrolTarget.x,z:patrolTarget.z}:{x:p.x,z:p.z};
+  }
  }
  const navActor={x:monster.position.x,z:monster.position.z};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
- const moving=Math.hypot(navActor.x-monster.position.x,navActor.z-monster.position.z)>.025;rakeAnimationForState(enemyState,moving);
+ const moving=Math.hypot(navActor.x-oldX,navActor.z-oldZ)>.025;rakeAnimationForState(enemyState,moving);
  attackCd-=dt;if(d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');anim(/attack|hit/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
-for(const a of survivors){if(a.hp>0&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<2.2&&elapsed>=a.nextHitAt){a.hp=Math.max(0,a.hp-35);a.nextHitAt=elapsed+1.05;if(a.hp<=0){a.respawnAt=elapsed+8;a.mesh.visible=false;notice('Survivor '+(a.id+1)+' down! Respawning in 8s')}}}
+ for(const a of survivors){if(a.hp>0&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<2.2&&elapsed>=a.nextHitAt){a.hp=Math.max(0,a.hp-35);a.nextHitAt=elapsed+1.05;if(a.hp<=0){a.respawnAt=elapsed+8;a.mesh.visible=false;notice('Survivor '+(a.id+1)+' down! Respawning in 8s')}}}
  document.querySelector('#survivor-hud').innerHTML='<b>SURVIVORS</b><br>'+survivors.map(a=>'S'+(a.id+1)+' '+(a.hp>0?a.hp+' HP':'DOWN')).join(' · ');
  document.querySelector('#status').textContent='HUNTER: '+enemyState.toUpperCase(); }
 const clock=new THREE.Clock();function tick(){requestAnimationFrame(tick);const dt=Math.min(clock.getDelta(),.05);if(started&&!gameover){elapsed+=dt;phaseTime+=dt;const phaseDuration=isNight?NIGHT_LENGTH:DAY_LENGTH;if(phaseTime>=phaseDuration){phaseTime=0;setPhase(!isNight)}document.querySelector('#clock').textContent=(isNight?'NIGHT ':'DAY ')+Math.ceil((phaseDuration-phaseTime)/60)+'m';const p=controls.getObject().position;updateChunks();let v=new THREE.Vector3();if(keys.KeyW)v.z-=1;if(keys.KeyS)v.z+=1;if(keys.KeyA)v.x-=1;if(keys.KeyD)v.x+=1;if(v.lengthSq()){v.normalize();const f=new THREE.Vector3();camera.getWorldDirection(f);f.y=0;f.normalize();const right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),f);const delta=f.multiplyScalar(-v.z).add(right.multiplyScalar(v.x)).multiplyScalar((keys.ShiftLeft?8:5)*dt);{p.x+=delta.x;p.z+=delta.z;noise(keys.ShiftLeft?2:1)}}updateSurvivors(dt);moveEnemy(dt);if(mixer)mixer.update(dt);document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';document.querySelector('#bar').style.width=player.hp+'%';document.querySelector('#bar').style.background=player.hp<35?'#e34c4c':'#64d68a'}renderer.render(scene,camera)}tick();
