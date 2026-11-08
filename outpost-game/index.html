@@ -25,7 +25,7 @@ function makeChunk(cx,cz){const key=cx+','+cz;if(chunkMap.has(key))return;const 
 for(let i=0;i<34;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<9||Math.abs(z)<7)continue;pine(x,z,6+cr()*9,items,obs)}
 for(let i=0;i<5;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<10&&Math.abs(z)<10)continue;const rr=.7+cr()*1.5,o=new THREE.Mesh(new THREE.DodecahedronGeometry(rr,0),rock);o.position.set(x,rr*.55,z);scene.add(o);items.push(o);obs.push({x,z,r:rr*.8})}
 chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs)}
-function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key)}}}
+function updateChunks(){for(let ix=Math.floor((cx*CHUNK-CHUNK/2)/NAV_CELL);ix<=Math.ceil((cx*CHUNK+CHUNK/2)/NAV_CELL);ix++)for(let iz=Math.floor((cz*CHUNK-CHUNK/2)/NAV_CELL);iz<=Math.ceil((cz*CHUNK+CHUNK/2)/NAV_CELL);iz++)registerGlobalCell(ix,iz);const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key)}}}
 updateChunks();
 const flashlight=new THREE.SpotLight(0xdbeaff,0,34,Math.PI/7,.5,1.3);camera.add(flashlight);const ft=new THREE.Object3D();ft.position.set(0,0,-1);camera.add(ft);flashlight.target=ft;let lightOn=false;
 const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null,action=null;
@@ -55,33 +55,34 @@ let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
-// GLOBAL ray-connected navigation: all actors use the same grid and route solver.
-const NAV_PATH_LIMIT=9000;
+// GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
+const globalNavCells=new Map(),globalRayCache=new Map();
 function globalCellKey(x,z){return x+','+z}
-function globalCellClear(ix,iz){const p=navCenter(ix,iz);return !blocked(p.x,p.z)}
-function globalNeighbors(ix,iz){const out=[],a=navCenter(ix,iz);for(const [ox,oz] of NAV_NEIGHBORS){const x=ix+ox,z=iz+oz,b=navCenter(x,z);if(globalCellClear(x,z)&&bridgeClear(a.x,a.z,b.x,b.z))out.push({x,z,cost:Math.hypot(ox,oz)*NAV_CELL})}return out}
-function nearestNavCell(x,z){let c=navCell(x,z);if(globalCellClear(c.x,c.z))return c;for(let r=1;r<=5;r++)for(let ox=-r;ox<=r;ox++)for(let oz=-r;oz<=r;oz++){if(Math.max(Math.abs(ox),Math.abs(oz))!==r)continue;const q={x:c.x+ox,z:c.z+oz};if(globalCellClear(q.x,q.z))return q}return c}
+function registerGlobalCell(ix,iz){const k=globalCellKey(ix,iz);if(!globalNavCells.has(k))globalNavCells.set(k,navCenter(ix,iz));return globalNavCells.get(k)}
+function globalCellClear(ix,iz){const p=registerGlobalCell(ix,iz);return !blocked(p.x,p.z)}
+function globalRayConnected(a,b){const ka=globalCellKey(a.ix,a.iz),kb=globalCellKey(b.ix,b.iz),key=ka<kb?ka+'|'+kb:kb+'|'+ka;if(globalRayCache.has(key))return globalRayCache.get(key);const clear=bridgeClear(a.x,a.z,b.x,b.z);globalRayCache.set(key,clear);return clear}
+function nearestNavCell(x,z){const c=navCell(x,z);if(globalCellClear(c.x,c.z))return{...c,...navCenter(c.x,c.z)};let best=null,bd=Infinity;for(let r=1;r<=6;r++)for(let ox=-r;ox<=r;ox++)for(let oz=-r;oz<=r;oz++){if(Math.max(Math.abs(ox),Math.abs(oz))!==r)continue;const q=navCenter(c.x+ox,c.z+oz),d=Math.hypot(q.x-x,q.z-z);if(d<bd&&!blocked(q.x,q.z)){best={ix:c.x+ox,iz:c.z+oz,...q};bd=d}}return best||{ix:c.x,iz:c.z,...navCenter(c.x,c.z)}}
 function globalRoute(start,goal){
- const s=nearestNavCell(start.x,start.z),g=nearestNavCell(goal.x,goal.z),sk=globalCellKey(s.x,s.z),gk=globalCellKey(g.x,g.z);
- if(sk===gk)return [navCenter(g.x,g.z)];
- const open=[{x:s.x,z:s.z,key:sk,f:Math.hypot(g.x-s.x,g.z-s.z)}],came=new Map(),cost=new Map([[sk,0]]),closed=new Set();let iterations=0;
- while(open.length&&iterations++<NAV_PATH_LIMIT){open.sort((a,b)=>a.f-b.f);const cur=open.shift();if(closed.has(cur.key))continue;if(cur.key===gk){const route=[];let k=gk;while(k!==sk){const [x,z]=k.split(',').map(Number);route.push(navCenter(x,z));k=came.get(k);if(!k)return null}route.reverse();return route}
- closed.add(cur.key);const base=cost.get(cur.key);
- for(const n of globalNeighbors(cur.x,cur.z)){const nk=globalCellKey(n.x,n.z),next=base+n.cost;if(closed.has(nk)||next>=(cost.get(nk)??Infinity))continue;cost.set(nk,next);came.set(nk,cur.key);open.push({x:n.x,z:n.z,key:nk,f:next+Math.hypot(g.x-n.x,g.z-n.z)*NAV_CELL})}
+ const s=nearestNavCell(start.x,start.z),g=nearestNavCell(goal.x,goal.z);
+ if(bridgeClear(start.x,start.z,goal.x,goal.z))return[{x:goal.x,z:goal.z}];
+ const nodes=[s,...Array.from(globalNavCells.entries()).map(([k,p])=>{const [ix,iz]=k.split(',').map(Number);return{ix,iz,...p}}).filter(n=>!blocked(n.x,n.z))];
+ const unique=new Map(nodes.map(n=>[globalCellKey(n.ix,n.iz),n]));unique.set(globalCellKey(g.ix,g.iz),g);const all=[...unique.values()],sk=globalCellKey(s.ix,s.iz),gk=globalCellKey(g.ix,g.iz);
+ const dist=new Map([[sk,0]]),prev=new Map(),unseen=new Set(all.map(n=>globalCellKey(n.ix,n.iz)));let loops=0;
+ while(unseen.size&&loops++<all.length){let ck=null,cd=Infinity;for(const k of unseen){const d=dist.get(k)??Infinity;if(d<cd){cd=d;ck=k}}if(ck===null||!Number.isFinite(cd))break;if(ck===gk)break;unseen.delete(ck);const a=unique.get(ck);if(!a)continue;
+ for(const k of unseen){const b=unique.get(k);if(!b||!globalRayConnected(a,b))continue;const nd=cd+Math.hypot(b.x-a.x,b.z-a.z);if(nd<(dist.get(k)??Infinity)){dist.set(k,nd);prev.set(k,ck)}}
  }
- return null
+ if(!prev.has(gk))return null;const route=[];let k=gk;while(k!==sk){const n=unique.get(k);if(!n)return null;route.push({x:n.x,z:n.z});k=prev.get(k);if(!k)return null}route.reverse();route.push({x:goal.x,z:goal.z});return route
 }
 function cellBridgeMove(actor,goal,dt,speed){
  const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);if(dist<.2){actor.navRoute=null;actor.navRouteIndex=0;return}
  const goalCell=navCell(goal.x,goal.z),routeGoal=globalCellKey(goalCell.x,goalCell.z);
- // Route is global and recalculated for changed destinations, blocked segments, or exhausted waypoints.
  if(!actor.navRoute||actor.navRouteGoal!==routeGoal||actor.navRouteIndex>=actor.navRoute.length||
     (actor.navRouteIndex<actor.navRoute.length&&!bridgeClear(actor.x,actor.z,actor.navRoute[actor.navRouteIndex].x,actor.navRoute[actor.navRouteIndex].z))){
   actor.navRoute=globalRoute({x:actor.x,z:actor.z},goal);actor.navRouteIndex=0;actor.navRouteGoal=routeGoal;
  }
  let wp=actor.navRoute?.[actor.navRouteIndex];
  if(!wp){if(bridgeClear(actor.x,actor.z,goal.x,goal.z))wp=goal;else{actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt;return}}
- if(navDebug){const h=navCell(actor.x,actor.z),c=navCenter(h.x,h.z);for(const [ox,oz] of NAV_NEIGHBORS){const q=navCenter(h.x+ox,h.z+oz);navDebugSegments.push(c.x,.08,c.z,q.x,.08,q.z,bridgeClear(c.x,c.z,q.x,q.z)?0:1)}navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
+ if(navDebug){navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
  const dx=wp.x-actor.x,dz=wp.z-actor.z,l=Math.hypot(dx,dz);if(l<.45){actor.navRouteIndex++;return}
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
  if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.navStuck=0}else{actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt}
