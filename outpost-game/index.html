@@ -99,9 +99,12 @@ function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject()
    const moved=entities.map(e=>{const prev=aiPositions.get(e.entity),movement=prev?Math.hypot(e.x-prev.x,e.z-prev.z):0;aiPositions.set(e.entity,{x:e.x,z:e.z});return {...e,movement}}).filter(e=>e.movement>.15);
    aiCheckAt=elapsed+11;
    if(chaseTarget&&!entities.some(e=>e.entity===chaseTarget))chaseTarget=null;
-   // Patrol keeps its chosen target; while hunting, movement can trigger a switch every 11 seconds.
-   if(chaseTarget&&moved.length){const alternatives=moved.filter(e=>e.entity!==chaseTarget);if(alternatives.length){alternatives.sort((a,b)=>b.movement-a.movement);chaseTarget=alternatives[0].entity}}
-   else if(!chaseTarget&&moved.length){moved.sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z));chaseTarget=moved[0].entity}
+   const inRange=e=>Math.hypot(e.x-monster.position.x,e.z-monster.position.z)<=45;
+   const current=entities.find(e=>e.entity===chaseTarget);if(current&&!inRange(current))chaseTarget=null;
+   // Hunt/switch only among entities inside 45 units; otherwise return to patrol.
+   const nearbyMoved=moved.filter(inRange);
+   if(chaseTarget&&nearbyMoved.length){const alternatives=nearbyMoved.filter(e=>e.entity!==chaseTarget);if(alternatives.length){alternatives.sort((a,b)=>b.movement-a.movement);chaseTarget=alternatives[0].entity}}
+   else if(!chaseTarget&&nearbyMoved.length){nearbyMoved.sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z));chaseTarget=nearbyMoved[0].entity}
    if(moved.length){moved.sort((a,b)=>b.movement-a.movement);patrolTarget=moved[0].entity;patrolPickAt=elapsed+11}
   }
   const target=entities.find(e=>e.entity===chaseTarget);
