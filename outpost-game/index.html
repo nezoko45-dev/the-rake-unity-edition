@@ -38,7 +38,8 @@ let attackAnimUntil=0;function rakeAnimationForState(state,moving,actualSpeed=0)
  if(elapsed<attackAnimUntil||state==='attack'){anim(/attack|hit|bite|kill/i);if(action)action.timeScale=1;return}
  if(!moving){anim(/idle|stand|breath/i);if(action)action.timeScale=1;return}
  // Walk during patrol/investigation; run only while actively hunting or retreating.
- const running=/hunt|retreat/i.test(state),runClip=clips.find(c=>/run|sprint/i.test(c.name)),walkClip=clips.find(c=>/walk|walking/i.test(c.name));
+ const running=/hunt|retreat/i.test(state),runClip=clips.find(c=>/run|sprint/i.test(c.name)),walkClip=clips.find(c=>/walk/i.test(c.name)&&!/run|attack|hurt|idle/i.test(c.name));
+ // Use the embedded Walk clip for patrol/investigation; reserve Run for chase/retreat.
  const moveClip=running?(runClip||walkClip):(walkClip||runClip);
  if(moveClip&&moveClip.name!==activeClip){action?.fadeOut(.12);action=mixer.clipAction(moveClip);action.reset().fadeIn(.12).play();activeClip=moveClip.name}
  if(action){action.enabled=true;action.timeScale=running?1.15:1}
