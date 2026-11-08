@@ -60,13 +60,13 @@ function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().
 function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null}
  else if(d<2.15){enemyState='attack';goal=p;enemySpeed=0}
- else if(d<18){enemyState='hunt';goal=p;enemySpeed=d<4?6.8:5.8}
  else {
-  // Night AI: choose a living survivor and continuously follow its current coordinates.
+  // Survivors take priority over the player except when the Rake is already attacking the player.
   const living=survivors.filter(a=>a.hp>0&&a.mesh.visible);
   let victim=null,victimD=Infinity;
   for(const a of living){const sd=Math.hypot(a.x-monster.position.x,a.z-monster.position.z);if(sd<victimD){victimD=sd;victim=a}}
-  if(victim&&victimD<65){enemyState='hunt-survivor';patrolTarget=victim;goal={x:victim.x,z:victim.z};enemySpeed=victimD<4?6.4:5.2}
+  if(victim&&victimD<85){enemyState='hunt-survivor';patrolTarget=victim;goal={x:victim.x,z:victim.z};enemySpeed=victimD<4?6.4:5.8}
+  else if(d<18){enemyState='hunt';goal=p;enemySpeed=d<4?6.8:5.8}
   else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal=noisePos;enemySpeed=4.8}
   else{enemyState='patrol';enemySpeed=3.7;if(!patrolTarget||!survivors.includes(patrolTarget)||patrolTarget.hp<=0||elapsed>=patrolPickAt){const targets=living.filter(a=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)>2.5);patrolTarget=targets.length?targets[Math.floor(rand()*targets.length)]:{x:p.x,z:p.z};patrolPickAt=elapsed+5+rand()*2}goal=survivors.includes(patrolTarget)?{x:patrolTarget.x,z:patrolTarget.z}:patrolTarget}
  }
