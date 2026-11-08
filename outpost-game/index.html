@@ -40,10 +40,34 @@ addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!li
 function notice(t){const n=document.querySelector('#notice');n.textContent=t;n.style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>n.style.display='none',2500)}
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 
-// Cell-to-cell ray bridge navigation. A bridge exists only when its sampled line is clear.
-const CELL=3.0;
+// Global ray-connected cell navigation: A* searches the grid, and every edge is a clear ray.
+const CELL=3.0,NAV_LIMIT=12000,NAV_CACHE=new WeakMap();
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
-function cellBridgeMove(actor,goal,dt,speed){let tx=goal.x,tz=goal.z;const dx=tx-actor.x,dz=tz-actor.z;if(Math.hypot(dx,dz)<.55)return;if(!bridgeClear(actor.x,actor.z,tx,tz)){let best=null,bestScore=Infinity;const toward=Math.atan2(dz,dx);for(let k=0;k<24;k++){const a=toward+(k/24)*Math.PI*2,r=2.2+(k%3)*1.5,px=actor.x+Math.cos(a)*r,pz=actor.z+Math.sin(a)*r;if(blocked(px,pz)||!bridgeClear(actor.x,actor.z,px,pz))continue;const score=Math.hypot(goal.x-px,goal.z-pz)+Math.abs(Math.atan2(Math.sin(a-toward),Math.cos(a-toward)))*1.1;if(score<bestScore){bestScore=score;best={x:px,z:pz}}}if(!best)return;tx=best.x;tz=best.z}const vx=tx-actor.x,vz=tz-actor.z,l=Math.hypot(vx,vz)||1;const step=Math.min(speed*dt,l),nx=actor.x+vx/l*step,nz=actor.z+vz/l*step;if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz}}
+function cellKey(ix,iz){return ix+','+iz}
+function cellPoint(ix,iz){return{x:ix*CELL+CELL*.5,z:iz*CELL+CELL*.5}}
+function cellAt(x,z){return{x:Math.floor(x/CELL),z:Math.floor(z/CELL)}}
+function routeCells(start,goal){
+ const s=cellAt(start.x,start.z),g=cellAt(goal.x,goal.z),sk=cellKey(s.x,s.z),gk=cellKey(g.x,g.z);
+ if(sk===gk)return [];
+ const open=[{x:s.x,z:s.z,key:sk,g:0,f:Math.hypot(g.x-s.x,g.z-s.z)}],came=new Map(),cost=new Map([[sk,0]]),closed=new Set();let found=false,exp=0;
+ while(open.length&&exp++<NAV_LIMIT){open.sort((a,b)=>b.f-a.f);const cur=open.pop();if(closed.has(cur.key))continue;if(cur.key===gk){found=true;break}closed.add(cur.key);
+  const cp=cellPoint(cur.x,cur.z);
+  for(let ox=-1;ox<=1;ox++)for(let oz=-1;oz<=1;oz++){if(!ox&&!oz)continue;const nx=cur.x+ox,nz=cur.z+oz,nk=cellKey(nx,nz);if(closed.has(nk))continue;const np=cellPoint(nx,nz);if(blocked(np.x,np.z)||!bridgeClear(cp.x,cp.z,np.x,np.z))continue;
+   const step=(ox&&oz)?Math.SQRT2:1,ng=cur.g+step;if(ng>=(cost.get(nk)??Infinity))continue;cost.set(nk,ng);came.set(nk,cur.key);open.push({x:nx,z:nz,key:nk,g:ng,f:ng+Math.hypot(g.x-nx,g.z-nz)});
+  }
+ }
+ if(!found)return null;const path=[];let k=gk;while(k!==sk){const [ix,iz]=k.split(',').map(Number);path.push(cellPoint(ix,iz));k=came.get(k);if(!k)return null}path.reverse();return path;
+}
+function cellBridgeMove(actor,goal,dt,speed){
+ if(!actor.navState)actor.navState={path:[],goalKey:'',index:0};const state=actor.navState,g=cellAt(goal.x,goal.z),goalKey=cellKey(g.x,g.z),a=cellAt(actor.x,actor.z);
+ if(state.goalKey!==goalKey||!state.path.length||state.index>=state.path.length||!bridgeClear(actor.x,actor.z,state.path[state.index].x,state.path[state.index].z)){
+  state.path=routeCells({x:actor.x,z:actor.z},goal)||[];state.goalKey=goalKey;state.index=0;
+ }
+ let waypoint=state.path[state.index]||goal;
+ if(!bridgeClear(actor.x,actor.z,waypoint.x,waypoint.z)){state.path=routeCells({x:actor.x,z:actor.z},goal)||[];state.index=0;waypoint=state.path[0]||goal}
+ const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,l=Math.hypot(dx,dz);if(l<.35){if(state.index<state.path.length)state.index++;return}
+ const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz}
+}
 const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
 function limb(parent,material,len,r){const pivot=new THREE.Group();parent.add(pivot);const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r*.72,r,len,8),material);mesh.position.y=-len/2;pivot.add(mesh);return pivot}
 function makeSurvivor(x,z,i){const root=new THREE.Group(),torso=new THREE.Mesh(new THREE.BoxGeometry(.52,.72,.28),survivorMat);torso.position.y=1.25;root.add(torso);const chest=new THREE.Mesh(new THREE.BoxGeometry(.58,.24,.31),gearMat);chest.position.y=1.48;root.add(chest);const head=new THREE.Mesh(new THREE.SphereGeometry(.22,12,10),skinMat);head.position.y=1.82;root.add(head);const neck=new THREE.Mesh(new THREE.CylinderGeometry(.09,.1,.12,8),skinMat);neck.position.y=1.68;root.add(neck);
@@ -74,7 +98,7 @@ function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject()
   else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
   else{enemyState='patrol-movement-cells';enemySpeed=3.7;const patrol=entities.find(e=>e.entity===patrolTarget)||entities[0];patrolTarget=patrol.entity;goal={x:patrol.x,z:patrol.z}}
  }
- const navActor={x:monster.position.x,z:monster.position.z};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
+ const navActor={x:monster.position.x,z:monster.position.z,navState:monster.navState};cellBridgeMove(navActor,goal,dt,enemySpeed);monster.navState=navActor.navState;monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),moving=frameMove>.025;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
