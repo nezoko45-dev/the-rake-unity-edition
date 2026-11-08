@@ -32,17 +32,27 @@ const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20r
 function loadModel(i=0){if(i>=paths.length){notice('Monster model failed; refresh after checking Assets.');return}loader.load(paths[i],g=>{template=g.scene;clips=g.animations;spawnMonster();console.log('Loaded reused Rake GLB',paths[i],clips.map(c=>c.name))},undefined,()=>loadModel(i+1))}
 function findHeadControlBone(root){const bones=[];root.traverse(o=>{if(o.isBone)bones.push(o)});if(!bones.length)return null;const named=bones.map(b=>{const n=b.name.toLowerCase();let score=0;if(/head|skull|cranium/.test(n))score+=100;if(/neck/.test(n))score+=45;if(/face|jaw|eye|look/.test(n))score+=25;if(/upper|top/.test(n))score+=5;return {bone:b,score}}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);if(named.length)return named[0].bone;root.updateMatrixWorld(true);let highest=null,maxY=-Infinity;for(const b of bones){const p=new THREE.Vector3();b.getWorldPosition(p);if(p.y>maxY){maxY=p.y;highest=b}}return highest}
 function spawnMonster(){monster=SU.clone(template);headBone=null;monster.traverse(o=>{if(o.isBone&&(o.name==='Head_12_13'||o.name==='head'))headBone=o});if(!headBone)headBone=findHeadControlBone(monster);if(headBone){headBaseY=headBone.rotation.y;headBone.userData.trackYaw=0;console.log('Forest Freeplay Rake head bone:',headBone.name)}else console.warn('Forest Freeplay Rake skeleton has no head bone; tracking disabled');monster.scale.setScalar(1.25);monster.position.set(rakeSpawn.x,0,rakeSpawn.z);scene.add(monster);const bounds=new THREE.Box3().setFromObject(monster);monster.position.y+=Math.max(0,-bounds.min.y)+.85;scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}activeClip=c?.name||'';monsterGroundOffset=monster.position.y;}
-const rakeSpawn={x:0,z:-36};let patrolTarget=null,patrolPickAt=0,chaseTarget=null,aiCheckAt=0;const aiPositions=new Map();const moon=new THREE.PointLight(0x9bbcff,0,80);moon.position.set(0,18,0);scene.add(moon);let activeClip='',monsterGroundOffset=0;function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c&&c.name!==activeClip){action?.fadeOut(.18);action=mixer.clipAction(c);action.reset().fadeIn(.18).play();activeClip=c.name}}
-let attackAnimUntil=0;function rakeAnimationForState(state,moving,actualSpeed=0){
- if(elapsed<rakeHurtUntil){anim(/hurt1|hurt/i);if(action)action.timeScale=1;return}
- if(elapsed<attackAnimUntil||state==='attack'){anim(/attack|hit|bite|kill/i);if(action)action.timeScale=1;return}
- if(!moving){anim(/idle|stand|breath/i);if(action)action.timeScale=1;return}
- // Walk during patrol/investigation; run only while actively hunting or retreating.
- const running=/hunt|retreat/i.test(state),runClip=clips.find(c=>/run|sprint/i.test(c.name)),walkClip=clips.find(c=>/walk/i.test(c.name)&&!/run|attack|hurt|idle/i.test(c.name));
- // Use the embedded Walk clip for patrol/investigation; reserve Run for chase/retreat.
- const moveClip=running?(runClip||walkClip):(walkClip||runClip);
- if(moveClip&&moveClip.name!==activeClip){action?.fadeOut(.12);action=mixer.clipAction(moveClip);action.reset().fadeIn(.12).play();activeClip=moveClip.name}
- if(action){action.enabled=true;action.timeScale=running?1.15:1}
+const rakeSpawn={x:0,z:-36};let patrolTarget=null,patrolPickAt=0,chaseTarget=null,aiCheckAt=0;const aiPositions=new Map();const moon=new THREE.PointLight(0x9bbcff,0,80);moon.position.set(0,18,0);scene.add(moon);let activeClip='',monsterGroundOffset=0;
+function playRakeClip(clip,speed=1){
+ if(!mixer||!clip)return;
+ if(activeClip!==clip.name||!action){
+  if(action){action.stop();mixer.uncacheAction(action.getClip(),monster)}
+  action=mixer.clipAction(clip);action.reset();action.enabled=true;action.setLoop(THREE.LoopRepeat,Infinity);action.clampWhenFinished=false;action.setEffectiveWeight(1);action.setEffectiveTimeScale(speed);action.play();activeClip=clip.name;
+ }else{action.enabled=true;action.setEffectiveWeight(1);action.setEffectiveTimeScale(speed);if(!action.isRunning())action.play()}
+}
+function anim(regex){playRakeClip(clips.find(x=>regex.test(x.name)))}
+let attackAnimUntil=0;
+function rakeAnimationForState(state,moving,actualSpeed=0){
+ const hurt=clips.find(c=>/hurt1|hurt/i.test(c.name)),attack=clips.find(c=>/attack|hit|bite|kill/i.test(c.name));
+ if(elapsed<rakeHurtUntil&&hurt){playRakeClip(hurt,1);return}
+ if((elapsed<attackAnimUntil||state==='attack')&&attack){playRakeClip(attack,1);return}
+ const running=/hunt|retreat/i.test(state);
+ const walk=clips.find(c=>/^walk(?:ing)?(?:$|[_ .-])/i.test(c.name)||/walk/i.test(c.name)&&!/run|attack|hurt|idle/i.test(c.name));
+ const run=clips.find(c=>/run|sprint/i.test(c.name)&&!/attack|hurt/i.test(c.name));
+ const idle=clips.find(c=>/idle|stand|breath/i.test(c.name));
+ // Select the embedded locomotion clips directly and keep them playing while nav moves.
+ if(moving){const locomotion=running?(run||walk):(walk||run);if(locomotion)playRakeClip(locomotion,running?1.15:1)}
+ else if(idle)playRakeClip(idle,1);
 }
 const day=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.45;let isNight=false;const DAY_LENGTH=150,NIGHT_LENGTH=450;function setPhase(n){if(isNight===n)return;isNight=n;if(n){day.pause();night.play().catch(()=>{});scene.background.set(0x010204);scene.fog.color.set(0x010204);scene.fog.near=3;scene.fog.far=38;hemi.intensity=.015;sun.intensity=0;moon.intensity=.035}else{night.pause();day.play().catch(()=>{});scene.background.set(0x8db5d3);scene.fog.color.set(0x8db5d3);scene.fog.near=55;scene.fog.far=190;hemi.intensity=2.2;sun.intensity=2;moon.intensity=0}}function playMusic(){(isNight?night:day).play().catch(()=>{})}
 const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState='patrol',lastNoise=0,noisePos=new THREE.Vector3(),enemySpeed=4.3,attackCd=0,gameover=false,rakeHP=15000,rakeDamageCd=0,rakeHurtUntil=0,rakeSlowUntil=0;
