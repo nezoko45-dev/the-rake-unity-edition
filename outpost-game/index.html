@@ -214,7 +214,7 @@ function updateRakeHeadLook(dt){
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
  const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
- const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),moving=frameMove>.025;rakeAnimationForState(enemyState,moving,actualSpeed);
+ const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),goalDistance=goal?Math.hypot(goal.x-monster.position.x,goal.z-monster.position.z):0,moving=goalDistance>.65&&enemySpeed>0;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
  for(const a of survivors){if(a.hp>0&&chaseTarget===a&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<2.2&&elapsed>=a.nextHitAt){a.hp=Math.max(0,a.hp-35);a.nextHitAt=elapsed+1.05;attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(a.hp<=0){a.respawnAt=elapsed+8;a.mesh.visible=false;notice('Survivor '+(a.id+1)+' down! Respawning in 8s')}}}
  document.querySelector('#survivor-hud').innerHTML='<b>SURVIVORS</b><br>'+survivors.map(a=>'S'+(a.id+1)+' '+(a.hp>0?a.hp+' HP':'DOWN')).join(' · ');
