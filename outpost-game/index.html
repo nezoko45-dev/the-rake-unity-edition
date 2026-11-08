@@ -26,7 +26,6 @@ for(let i=0;i<34;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUN
 for(let i=0;i<5;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<10&&Math.abs(z)<10)continue;const rr=.7+cr()*1.5,o=new THREE.Mesh(new THREE.DodecahedronGeometry(rr,0),rock);o.position.set(x,rr*.55,z);scene.add(o);items.push(o);obs.push({x,z,r:rr*.8})}
 chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs);for(let ix=Math.floor(cx*CHUNK/NAV_CELL);ix<=Math.ceil((cx+1)*CHUNK/NAV_CELL);ix++)for(let iz=Math.floor(cz*CHUNK/NAV_CELL);iz<=Math.ceil((cz+1)*CHUNK/NAV_CELL);iz++)registerGlobalCell(ix,iz)}
 function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let ix=Math.floor((cx*CHUNK-CHUNK/2)/NAV_CELL);ix<=Math.ceil((cx*CHUNK+CHUNK/2)/NAV_CELL);ix++)for(let iz=Math.floor((cz*CHUNK-CHUNK/2)/NAV_CELL);iz<=Math.ceil((cz*CHUNK+CHUNK/2)/NAV_CELL);iz++)registerGlobalCell(ix,iz);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key)}}}
-updateChunks();
 const flashlight=new THREE.SpotLight(0xdbeaff,0,34,Math.PI/7,.5,1.3);camera.add(flashlight);const ft=new THREE.Object3D();ft.position.set(0,0,-1);camera.add(ft);flashlight.target=ft;let lightOn=false;
 const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null,action=null;
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
@@ -52,6 +51,7 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 // Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
 // Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
 let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+updateChunks();
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
