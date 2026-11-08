@@ -31,7 +31,7 @@ const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
 function loadModel(i=0){if(i>=paths.length){notice('Monster model failed; refresh after checking Assets.');return}loader.load(paths[i],g=>{template=g.scene;clips=g.animations;spawnMonster();console.log('Loaded reused Rake GLB',paths[i],clips.map(c=>c.name))},undefined,()=>loadModel(i+1))}
 function findHeadControlBone(root){const bones=[];root.traverse(o=>{if(o.isBone)bones.push(o)});if(!bones.length)return null;const named=bones.map(b=>{const n=b.name.toLowerCase();let score=0;if(/head|skull|cranium/.test(n))score+=100;if(/neck/.test(n))score+=45;if(/face|jaw|eye|look/.test(n))score+=25;if(/upper|top/.test(n))score+=5;return {bone:b,score}}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);if(named.length)return named[0].bone;root.updateMatrixWorld(true);let highest=null,maxY=-Infinity;for(const b of bones){const p=new THREE.Vector3();b.getWorldPosition(p);if(p.y>maxY){maxY=p.y;highest=b}}return highest}
-function spawnMonster(){monster=SU.clone(template);headBone=findHeadControlBone(monster);if(headBone){headBaseY=headBone.rotation.y;console.log('Auto-detected Rake head-control bone:',headBone.name)}else console.warn('Rake skeleton has no bones; head tracking disabled');monster.scale.setScalar(1.25);monster.position.set(rakeSpawn.x,0,rakeSpawn.z);scene.add(monster);const bounds=new THREE.Box3().setFromObject(monster);monster.position.y+=Math.max(0,-bounds.min.y)+.85;scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}activeClip=c?.name||'';monsterGroundOffset=monster.position.y;}
+function spawnMonster(){monster=SU.clone(template);headBone=null;monster.traverse(o=>{if(o.isBone&&o.name==='Head_12_13')headBone=o});if(!headBone)headBone=findHeadControlBone(monster);if(headBone){headBaseY=headBone.rotation.y;console.log('Rake head tracking bone:',headBone.name)}else console.warn('Rake skeleton has no head bone; head tracking disabled');monster.scale.setScalar(1.25);monster.position.set(rakeSpawn.x,0,rakeSpawn.z);scene.add(monster);const bounds=new THREE.Box3().setFromObject(monster);monster.position.y+=Math.max(0,-bounds.min.y)+.85;scene.add(monster);mixer=new THREE.AnimationMixer(monster);const c=clips.find(x=>/idle/i.test(x.name))||clips[0];if(c){action=mixer.clipAction(c);action.play()}activeClip=c?.name||'';monsterGroundOffset=monster.position.y;}
 const rakeSpawn={x:0,z:-36};let patrolTarget=null,patrolPickAt=0,chaseTarget=null,aiCheckAt=0;const aiPositions=new Map();const moon=new THREE.PointLight(0x9bbcff,0,80);moon.position.set(0,18,0);scene.add(moon);let activeClip='',monsterGroundOffset=0;function anim(regex){if(!mixer)return;const c=clips.find(x=>regex.test(x.name));if(c&&c.name!==activeClip){action?.fadeOut(.18);action=mixer.clipAction(c);action.reset().fadeIn(.18).play();activeClip=c.name}}
 let attackAnimUntil=0;function rakeAnimationForState(state,moving,actualSpeed=0){
  if(elapsed<attackAnimUntil||state==='attack'){anim(/attack|hit|bite|kill/i);if(action)action.timeScale=1;return}
@@ -160,14 +160,17 @@ function updateRakeHeadLook(dt){
  const p=controls.getObject().position;
  let target={x:p.x,z:p.z},best=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);
  for(const s of survivors){if(s.hp<=0||!s.mesh.visible)continue;const d=Math.hypot(s.x-monster.position.x,s.z-monster.position.z);if(d<best){best=d;target={x:s.x,z:s.z}}}
- // Rotate around the model's vertical axis in WORLD space, then convert back to the bone's local space.
+ // Keep the GLB animation's head pose; apply tracking as a separate additive quaternion.
  monster.updateMatrixWorld(true);headBone.parent?.updateMatrixWorld(true);
  const boneWorld=new THREE.Vector3();headBone.getWorldPosition(boneWorld);
- const parentWorldYaw=headBone.parent?new THREE.Euler().setFromQuaternion(headBone.parent.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y:monster.rotation.y;
- const base=headBaseY;
- let desired=base;
- if(best<=28){const worldYaw=Math.atan2(target.x-boneWorld.x,target.z-boneWorld.z);let relative=worldYaw-parentWorldYaw;relative=Math.atan2(Math.sin(relative),Math.cos(relative));desired=base+THREE.MathUtils.clamp(relative,-1.25,1.25)}
- headBone.rotation.y=THREE.MathUtils.damp(headBone.rotation.y,desired,9,dt);
+ const parentQ=headBone.parent?headBone.parent.getWorldQuaternion(new THREE.Quaternion()):monster.getWorldQuaternion(new THREE.Quaternion());
+ const parentYaw=new THREE.Euler().setFromQuaternion(parentQ,'YXZ').y;
+ let yawOffset=0;
+ if(best<=28){let worldYaw=Math.atan2(target.x-boneWorld.x,target.z-boneWorld.z),relative=worldYaw-parentYaw;relative=Math.atan2(Math.sin(relative),Math.cos(relative));yawOffset=THREE.MathUtils.clamp(relative,-1.25,1.25)}
+ // Capture current animated rotation each frame and layer a smoothed yaw offset on top.
+ headBone.userData.trackYaw=THREE.MathUtils.damp(headBone.userData.trackYaw||0,yawOffset,9,dt);
+ const trackingQ=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),headBone.userData.trackYaw);
+ headBone.quaternion.multiply(trackingQ);
 }function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
