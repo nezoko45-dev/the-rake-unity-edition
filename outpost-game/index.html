@@ -91,24 +91,28 @@ function globalRoute(start,goal){
  return null
 }
 function cellBridgeMove(actor,goal,dt,speed){
- const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);if(dist<.2){actor.navRoute=null;actor.navRouteIndex=0;return}
- const goalCell=navCell(goal.x,goal.z),routeGoal=globalCellKey(goalCell.x,goalCell.z);
- if(!actor.navRoute||actor.navRouteGoal!==routeGoal||actor.navRouteIndex>=actor.navRoute.length||
-    (actor.navRouteIndex<actor.navRoute.length&&!bridgeClear(actor.x,actor.z,actor.navRoute[actor.navRouteIndex].x,actor.navRoute[actor.navRouteIndex].z))){
-  actor.navRoute=globalRoute({x:actor.x,z:actor.z},goal);actor.navRouteIndex=0;actor.navRouteGoal=routeGoal;
+ const dist=Math.hypot(goal.x-actor.x,goal.z-actor.z);
+ if(dist<.7){actor.navBridgeTarget=null;return}
+ // Every cell raycasts to nearby cells; a clear ray is the actual walkable bridge.
+ const here=navCell(actor.x,actor.z),center=navCenter(here.x,here.z);
+ let waypoint=actor.navBridgeTarget;
+ if(!waypoint||Math.hypot(actor.x-waypoint.x,actor.z-waypoint.z)<.45||blocked(waypoint.x,waypoint.z)||!bridgeClear(actor.x,actor.z,waypoint.x,waypoint.z)){
+  let best=null,bestScore=Infinity;
+  for(let radius=1;radius<=7;radius++)for(let ox=-radius;ox<=radius;ox++)for(let oz=-radius;oz<=radius;oz++){
+   if(Math.max(Math.abs(ox),Math.abs(oz))!==radius)continue;
+   const q=navCenter(here.x+ox,here.z+oz);if(blocked(q.x,q.z)||!bridgeClear(center.x,center.z,q.x,q.z)||!bridgeClear(actor.x,actor.z,q.x,q.z))continue;
+   const remaining=Math.hypot(goal.x-q.x,goal.z-q.z),hop=Math.hypot(q.x-actor.x,q.z-actor.z);
+   const score=remaining+hop*.035;
+   if(score<bestScore){bestScore=score;best=q}
+  }
+  if(best)waypoint=actor.navBridgeTarget=best;
+  else {actor.navBridgeTarget=null;return}
  }
- let wp=actor.navRoute?.[actor.navRouteIndex];
- if(!wp){
-  // Recover by taking a clear bridge hop to the best neighboring cell.
-  const here=nearestNavCell(actor.x,actor.z);let hop=null,score=Infinity;
-  for(const [ox,oz] of NAV_NEIGHBORS){const q=navCenter(here.ix+ox,here.iz+oz);if(blocked(q.x,q.z)||!bridgeClear(actor.x,actor.z,q.x,q.z))continue;const s=Math.hypot(goal.x-q.x,goal.z-q.z);if(s<score){score=s;hop=q}}
-  if(!hop){actor.navStuck=(actor.navStuck||0)+dt;return}
-  wp=hop;actor.navRoute=[wp];actor.navRouteIndex=0;
-}
- if(navDebug){navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
- const dx=wp.x-actor.x,dz=wp.z-actor.z,l=Math.hypot(dx,dz);if(l<.45){actor.navRouteIndex++;return}
+ if(navDebug)navDebugSegments.push(actor.x,.16,actor.z,waypoint.x,.16,waypoint.z,2);
+ const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,l=Math.hypot(dx,dz);if(l<.08)return;
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
- if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.navStuck=0}else{actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt}
+ if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.navStuck=0}
+ else actor.navBridgeTarget=null;
 }
 const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
 function limb(parent,material,len,r){const pivot=new THREE.Group();parent.add(pivot);const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r*.72,r,len,8),material);mesh.position.y=-len/2;pivot.add(mesh);return pivot}
