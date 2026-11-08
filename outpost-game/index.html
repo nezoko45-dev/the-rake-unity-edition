@@ -72,7 +72,7 @@ function globalRoute(start,goal){
   if(cur.ix===goalCell.x&&cur.iz===goalCell.z){route.push({x:goal.x,z:goal.z});return route}
   let best=null,bestScore=Infinity;
   // Generate/check bridge rays from this cell to every candidate in a local radius.
-  for(let radius=1;radius<=12;radius++)for(let ox=-radius;ox<=radius;ox++)for(let oz=-radius;oz<=radius){
+  for(let radius=1;radius<=12;radius++)for(let ox=-radius;ox<=radius;ox++)for(let oz=-radius;oz<=radius;oz++){
    if(Math.max(Math.abs(ox),Math.abs(oz))!==radius)continue;
    const ix=cur.ix+ox,iz=cur.iz+oz,k=globalCellKey(ix,iz);if(seen.has(k))continue;
    const p=navCenter(ix,iz);if(blocked(p.x,p.z))continue;
