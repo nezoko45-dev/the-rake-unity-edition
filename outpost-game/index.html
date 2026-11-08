@@ -81,7 +81,7 @@ function cellBridgeMove(actor,goal,dt,speed){
  }
  let wp=actor.navRoute?.[actor.navRouteIndex];
  if(!wp){if(bridgeClear(actor.x,actor.z,goal.x,goal.z))wp=goal;else{actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt;return}}
- if(navDebug){const c=navCenter(...Object.values(navCell(actor.x,actor.z)));for(const [ox,oz] of NAV_NEIGHBORS){const q=navCenter(c.x/NAV_CELL|0+ox,c.z/NAV_CELL|0+oz);navDebugSegments.push(c.x,.08,c.z,q.x,.08,q.z,bridgeClear(c.x,c.z,q.x,q.z)?0:1)}navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
+ if(navDebug){const h=navCell(actor.x,actor.z),c=navCenter(h.x,h.z);for(const [ox,oz] of NAV_NEIGHBORS){const q=navCenter(h.x+ox,h.z+oz);navDebugSegments.push(c.x,.08,c.z,q.x,.08,q.z,bridgeClear(c.x,c.z,q.x,q.z)?0:1)}navDebugSegments.push(actor.x,.16,actor.z,wp.x,.16,wp.z,2)}
  const dx=wp.x-actor.x,dz=wp.z-actor.z,l=Math.hypot(dx,dz);if(l<.45){actor.navRouteIndex++;return}
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
  if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.navStuck=0}else{actor.navRoute=null;actor.navStuck=(actor.navStuck||0)+dt}
