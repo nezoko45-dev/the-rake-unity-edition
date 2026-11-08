@@ -40,25 +40,38 @@ addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!li
 function notice(t){const n=document.querySelector('#notice');n.textContent=t;n.style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>n.style.display='none',2500)}
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 
-// Ray-linked cell navigation (no A*): neighboring cells connect only through clear rays.
-const CELL=3.0;
+// Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
+const CELL=3.0, CELL_DIRS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function cellPoint(ix,iz){return{x:ix*CELL+CELL*.5,z:iz*CELL+CELL*.5}}
 function cellAt(x,z){return{x:Math.floor(x/CELL),z:Math.floor(z/CELL)}}
-// Each AI ray-checks its target. If blocked, it picks an open adjacent cell
-// connected by a ray, preferring cells with a clear onward ray to the target.
-function cellBridgeMove(actor,goal,dt,speed){
- let waypoint=goal;
- if(!bridgeClear(actor.x,actor.z,goal.x,goal.z)){
-  const here=cellAt(actor.x,actor.z),choices=[];
-  for(let ox=-1;ox<=1;ox++)for(let oz=-1;oz<=1;oz++){if(!ox&&!oz)continue;
-   const q=cellPoint(here.x+ox,here.z+oz);if(blocked(q.x,q.z)||!bridgeClear(actor.x,actor.z,q.x,q.z))continue;
-   const onward=bridgeClear(q.x,q.z,goal.x,goal.z),distance=Math.hypot(goal.x-q.x,goal.z-q.z);
-   choices.push({q,score:distance-(onward?CELL*2:0)});
+function cellKey(ix,iz){return ix+','+iz}
+// Cells establish links by raycasting between their centers. BFS follows only those links.
+function cellGraphRoute(actor,goal){
+ const s=cellAt(actor.x,actor.z),g=cellAt(goal.x,goal.z),R=18;
+ const minX=s.x-R,maxX=s.x+R,minZ=s.z-R,maxZ=s.z+R;
+ const start=cellKey(s.x,s.z),queue=[[s.x,s.z]],came=new Map([[start,null]]);let best={x:s.x,z:s.z,d:Math.hypot(goal.x-actor.x,goal.z-actor.z)},found=null;
+ for(let head=0;head<queue.length;head++){
+  const [x,z]=queue[head],p=cellPoint(x,z),d=Math.hypot(goal.x-p.x,goal.z-p.z);
+  if(d<best.d)best={x,z,d};if(x===g.x&&z===g.z){found={x,z};break}
+  for(const [dx,dz] of CELL_DIRS){const nx=x+dx,nz=z+dz;if(nx<minX||nx>maxX||nz<minZ||nz>maxZ)continue;
+   const k=cellKey(nx,nz);if(came.has(k))continue;const q=cellPoint(nx,nz);
+   if(blocked(q.x,q.z)||!bridgeClear(p.x,p.z,q.x,q.z))continue;
+   came.set(k,{x,z});queue.push([nx,nz]);
   }
-  choices.sort((a,b)=>a.score-b.score);if(!choices.length)return;waypoint=choices[0].q;
  }
- const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,l=Math.hypot(dx,dz);if(l<.35)return;
+ let end=found||{x:best.x,z:best.z},path=[];let k=cellKey(end.x,end.z);
+ while(k){const [x,z]=k.split(',').map(Number);path.push({x,z,...cellPoint(x,z)});const prev=came.get(k);k=prev?cellKey(prev.x,prev.z):null}
+ path.reverse();return path;
+}
+function cellBridgeMove(actor,goal,dt,speed){
+ const g=cellAt(goal.x,goal.z),refresh=actor.navRefresh||0;
+ if(!actor.navPath||actor.navGoal!==cellKey(g.x,g.z)||elapsed>=refresh){
+  actor.navPath=cellGraphRoute(actor,goal);actor.navIndex=0;actor.navGoal=cellKey(g.x,g.z);actor.navRefresh=elapsed+.55;
+ }
+ const path=actor.navPath||[];while(actor.navIndex<path.length-1&&Math.hypot(actor.x-path[actor.navIndex].x,actor.z-path[actor.navIndex].z)<.65)actor.navIndex++;
+ let waypoint=path[actor.navIndex]||goal;if(actor.navIndex>=path.length-1&&bridgeClear(actor.x,actor.z,goal.x,goal.z))waypoint=goal;
+ const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,l=Math.hypot(dx,dz);if(l<.12)return;
  const step=Math.min(speed*dt,l),nx=actor.x+dx/l*step,nz=actor.z+dz/l*step;
  if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz}
 }const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
