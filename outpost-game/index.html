@@ -107,10 +107,16 @@ function moveEnemy(dt){if(!monster||gameover)return;const p=controls.getObject()
    else if(!chaseTarget&&nearbyMoved.length){nearbyMoved.sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z));chaseTarget=nearbyMoved[0].entity}
    if(moved.length){moved.sort((a,b)=>b.movement-a.movement);patrolTarget=moved[0].entity;patrolPickAt=elapsed+11}
   }
-  const target=entities.find(e=>e.entity===chaseTarget);
+  // Reacquire any in-range entity even if it is standing still.
+  const target=entities.find(e=>e.entity===chaseTarget&&Math.hypot(e.x-monster.position.x,e.z-monster.position.z)<=45)||null;
   if(target){const td=Math.hypot(target.x-monster.position.x,target.z-monster.position.z);if(td<2.2){enemyState='attack';goal={x:target.x,z:target.z};enemySpeed=0}else{enemyState=target.isPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=td<4?6.8:5.8}}
-  else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
-  else{enemyState='patrol-movement-cells';enemySpeed=3.7;const patrol=entities.find(e=>e.entity===patrolTarget)||entities[0];patrolTarget=patrol.entity;goal={x:patrol.x,z:patrol.z}}
+  else{
+   chaseTarget=null;
+   const inRange=entities.filter(e=>Math.hypot(e.x-monster.position.x,e.z-monster.position.z)<=45);
+   if(inRange.length){inRange.sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z));chaseTarget=inRange[0].entity;const t=inRange[0],td=Math.hypot(t.x-monster.position.x,t.z-monster.position.z);enemyState=td<2.2?'attack':t.isPlayer?'hunt-player':'hunt-survivor';goal={x:t.x,z:t.z};enemySpeed=td<2.2?0:td<4?6.8:5.8}
+   else if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
+   else{enemyState='patrol-movement-cells';enemySpeed=3.7;let patrol=entities.find(e=>e.entity===patrolTarget)||entities.slice().sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z))[0];patrolTarget=patrol.entity;goal={x:patrol.x,z:patrol.z};if(Math.hypot(goal.x-monster.position.x,goal.z-monster.position.z)<3){goal={x:monster.position.x+Math.cos(elapsed*.31)*12,z:monster.position.z+Math.sin(elapsed*.31)*12}}}
+  }
  }
  const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
