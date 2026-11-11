@@ -186,7 +186,33 @@ function updateRakeHeadLook(dt){
  // Three.js mixer updates bone.quaternion before this; layer a local-Y offset after animation.
  const q=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),headBone.userData.trackYaw);
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
-}function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
+}// Rake-only 360-degree reactive steering. No grid cells or bridge waypoints.
+const RAKE_RAY_RANGE=12,RAKE_RAY_COUNT=360;
+function rakeRaySteer(actor,goal,dt,speed){
+ const toGoal=new THREE.Vector2(goal.x-actor.x,goal.z-actor.z),goalLen=toGoal.length(),targetDir=goalLen>.001?toGoal.clone().normalize():new THREE.Vector2(0,1);
+ let bestDir=null,bestScore=-Infinity;const rays=[];
+ for(let deg=0;deg<RAKE_RAY_COUNT;deg++){
+  const a=deg*Math.PI/180,dir=new THREE.Vector2(Math.sin(a),Math.cos(a));let length=RAKE_RAY_RANGE;
+  // Ray-circle intersection against tree/rock collision proxies; clip at the first hit.
+  for(const o of obstacles){
+   const ox=o.x-actor.x,oz=o.z-actor.z,along=ox*dir.x+oz*dir.y,rr=o.r+.8;
+   if(along<=0||along>length+rr)continue;
+   const perpendicularSq=ox*ox+oz*oz-along*along;if(perpendicularSq>rr*rr)continue;
+   const hit=along-Math.sqrt(Math.max(0,rr*rr-perpendicularSq));if(hit>=0&&hit<length)length=hit;
+  }
+  const score=length>=RAKE_RAY_RANGE-.001?1:0,alignment=dir.dot(targetDir);
+  const combined=score*(1.25+Math.max(0,alignment)*1.5)+alignment*.35+length/RAKE_RAY_RANGE*.2;
+  rays.push({dir,length,score,combined});if(combined>bestScore){bestScore=combined;bestDir=dir}
+ }
+ if(!bestDir)return;
+ // Pull toward target, guided by the best-scoring unobstructed ray.
+ const steering=targetDir.multiplyScalar(.42).add(bestDir.clone().multiplyScalar(.92));if(steering.lengthSq()<.001)steering.copy(bestDir);steering.normalize();
+ const desiredYaw=Math.atan2(steering.x,steering.y);actor.yaw=THREE.MathUtils.damp(actor.yaw??desiredYaw,desiredYaw,7,dt);
+ const step=Math.min(speed*dt,goalLen),nx=actor.x+steering.x*step,nz=actor.z+steering.y*step;
+ if(!blocked(nx,nz)){actor.x=nx;actor.z=nz}
+ else{rays.sort((a,b)=>b.combined-a.combined);for(const ray of rays){if(ray.score!==1)continue;const tx=actor.x+ray.dir.x*step,tz=actor.z+ray.dir.y*step;if(!blocked(tx,tz)){actor.x=tx;actor.z=tz;actor.yaw=Math.atan2(ray.dir.x,ray.dir.y);break}}}
+}
+function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
   const living=survivors.filter(a=>a.hp>0&&a.mesh.visible),entities=[{entity:p,x:p.x,z:p.z,isPlayer:true},...living.map(a=>({entity:a,x:a.x,z:a.z,isPlayer:false}))];
@@ -213,8 +239,8 @@ function updateRakeHeadLook(dt){
   }
  }
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
- const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;cellBridgeMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
- const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=Math.atan2(gx,gz);
+ const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;rakeRaySteer(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
+ const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=THREE.MathUtils.damp(monster.rotation.y,navActor.yaw??Math.atan2(gx,gz),7,dt);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),goalDistance=goal?Math.hypot(goal.x-monster.position.x,goal.z-monster.position.z):0,moving=goalDistance>.65&&enemySpeed>0;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
  for(const a of survivors){if(a.hp>0&&chaseTarget===a&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<2.2&&elapsed>=a.nextHitAt){a.hp=Math.max(0,a.hp-35);a.nextHitAt=elapsed+1.05;attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(a.hp<=0){a.respawnAt=elapsed+8;a.mesh.visible=false;notice('Survivor '+(a.id+1)+' down! Respawning in 8s')}}}
