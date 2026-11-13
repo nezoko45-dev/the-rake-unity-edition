@@ -169,11 +169,23 @@ function floatRakeAboveGround(actor,dt){if(!actor?.isRake||!actor.group)return;c
 function hasLineOfSight(from,to){if(!from?.pos||!to?.pos||![from.pos.x,from.pos.z,to.pos.x,to.pos.z].every(Number.isFinite))return false;const dx=to.pos.x-from.pos.x,dz=to.pos.z-from.pos.z,len=Math.hypot(dx,dz);if(len<.01)return true;for(const o of obstacles){const t=Math.max(0,Math.min(1,((o.x-from.pos.x)*dx+(o.z-from.pos.z)*dz)/(len*len)));const px=from.pos.x+dx*t,pz=from.pos.z+dz*t;if(Math.hypot(px-o.x,pz-o.z)<o.r+.25)return false}return true}
 function movePath(actor,speed,dt){
  const goal=actor?.pathGoal;if(!actor?.pos||!actor.group||!goal)return false;
- const steer=rakeSteerCell(actor,goal);if(!steer){actor.pathFailed=true;actor.think=0;return false}
- const dx=steer.x-actor.pos.x,dz=steer.z-actor.pos.z,len=Math.hypot(dx,dz);if(len<.04)return false;
- const step=Math.min(Math.max(0,speed*dt),len),nx=actor.pos.x+dx/len*step,nz=actor.pos.z+dz/len*step;
- if(!rakeBridgeClear(actor.pos.x,actor.pos.z,nx,nz)){actor.pathFailed=true;actor.think=0;return false}
- actor.pos.x=nx;actor.pos.z=nz;actor.group.position.x=nx;actor.group.position.z=nz;actor.group.rotation.y=Math.atan2(dx,dz);return true;
+ const p=actor.pos,dx=goal.x-p.x,dz=goal.z-p.z,dist=Math.hypot(dx,dz);if(dist<.5)return false;
+ const ud=actor.userData||(actor.userData={}),desired=Math.atan2(dx,dz);
+ let best=null,bestScore=-Infinity;
+ for(let deg=0;deg<360;deg+=3){const a=deg*Math.PI/180,vx=Math.sin(a),vz=Math.cos(a);
+  let clear=0,blocked=0,reach=0;for(const d of [.45,.9,1.5,2.4,3.6,5,7,9]){if(rakeBridgeClear(p.x,p.z,p.x+vx*d,p.z+vz*d)){clear++;reach=d}else blocked++}
+  if(!rakeBridgeClear(p.x,p.z,p.x+vx*.35,p.z+vz*.35))continue;
+  const targetGain=Math.max(-3,Math.min(3,dist-Math.hypot(goal.x-(p.x+vx*reach),goal.z-(p.z+vz*reach))));
+  const heading=ud.curvedVector||{x:dx/dist,z:dz/dist},smooth=vx*heading.x+vz*heading.z;
+  const score=clear*3-blocked*5+targetGain*4+(vx*Math.sin(desired)+vz*Math.cos(desired))*7+smooth*2;
+  if(score>bestScore){bestScore=score;best={x:vx,z:vz}}
+ }
+ if(!best)return false;
+ const current=ud.curvedVector||(ud.curvedVector={x:best.x,z:best.z}),blend=1-Math.exp(-dt*4.2);
+ current.x+=(best.x-current.x)*blend;current.z+=(best.z-current.z)*blend;const len=Math.hypot(current.x,current.z)||1;current.x/=len;current.z/=len;
+ const step=Math.min(Math.max(0,speed*dt),dist),nx=p.x+current.x*step,nz=p.z+current.z*step;
+ if(!rakeBridgeClear(p.x,p.z,nx,nz)){ud.curvedVector.x=best.x;ud.curvedVector.z=best.z;return false}
+ p.x=nx;p.z=nz;actor.group.position.x=nx;actor.group.position.z=nz;actor.group.rotation.y=Math.atan2(current.x,current.z);return true;
 }
 function setPath(actor,target){
  if(!actor?.pos||!target||![actor.pos.x,actor.pos.z,target.x,target.z].every(Number.isFinite)){if(actor){actor.pathGoal=null;actor.pathFailed=true}return}
