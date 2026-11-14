@@ -193,47 +193,42 @@ function rakeRaySteer(actor,goal,dt,speed){
  const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);
  if(dist<.01)return;
  const desiredX=dx/dist,desiredZ=dz/dist;
- // Persistent steering vector: keep the previous heading and bend it smoothly
- // toward the goal while obstacle repulsion curves it around trees and rocks.
+ // True persistent steering: the heading is a continuously integrated vector.
+ // Obstacles create a sustained tangent force, so the vector bends around
+ // their circumference instead of waiting for a collision to pick a new angle.
  let v=actor.steeringVector;
  if(!v||!Number.isFinite(v.x)||!Number.isFinite(v.z)||Math.hypot(v.x,v.z)<.001)v={x:desiredX,z:desiredZ};
- const look=Math.min(8,Math.max(2.5,dist)),aheadX=actor.x+v.x*look,aheadZ=actor.z+v.z*look;
- let avoidX=0,avoidZ=0;
+ let forceX=desiredX*1.25,forceZ=desiredZ*1.25;
+ const look=Math.min(10,Math.max(3.5,dist)),vx=v.x, vz=v.z;
  for(const o of obstacles){
-  const ox=aheadX-o.x,oz=aheadZ-o.z,d=Math.hypot(ox,oz),radius=o.r+2.25;
-  if(d>=radius)continue;
-  let nx=ox, nz=oz, n=d;
-  if(n<.05){nx=actor.x-o.x;nz=actor.z-o.z;n=Math.hypot(nx,nz)||1}
-  const strength=(radius-d)/radius;
-  avoidX+=(nx/n)*strength;avoidZ+=(nz/n)*strength;
+  const ox=o.x-actor.x,oz=o.z-actor.z;
+  const along=ox*vx+oz*vz;
+  if(along<-.5||along>look+o.r)continue;
+  const closestX=actor.x+vx*Math.max(0,along),closestZ=actor.z+vz*Math.max(0,along);
+  const px=o.x-closestX,pz=o.z-closestZ,perp=Math.hypot(px,pz);
+  const radius=o.r+2.6;
+  if(perp>radius)continue;
+  // Choose a side once and retain it for this obstacle encounter.
+  const cross=vx*oz-vz*ox;
+  const side=actor.steerSide||(cross>=0?-1:1);
+  actor.steerSide=side;
+  const urgency=1-Math.max(0,perp)/radius;
+  const tangentX=vz*side,tangentZ=-vx*side;
+  const awayX=perp>.05?px/perp:tangentX,awayZ=perp>.05?pz/perp:tangentZ;
+  const strength=3.8*urgency+1.15;
+  forceX+=tangentX*strength+awayX*urgency*1.7;
+  forceZ+=tangentZ*strength+awayZ*urgency*1.7;
  }
- const steerX=desiredX+avoidX*2.15,steerZ=desiredZ+avoidZ*2.15;
- const blend=1-Math.exp(-Math.max(0,dt)*3.2);
- v.x+=(steerX-v.x)*blend;v.z+=(steerZ-v.z)*blend;
+ // Integrate and normalize the same vector every frame; no ray scan or
+ // collision-triggered heading replacement.
+ const blend=1-Math.exp(-Math.max(0,dt)*2.7);
+ v.x+=(forceX-v.x)*blend;v.z+=(forceZ-v.z)*blend;
  const len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;actor.steeringVector=v;
  const desiredYaw=Math.atan2(v.x,v.z);
  actor.yaw=THREE.MathUtils.damp(actor.yaw??desiredYaw,desiredYaw,7,dt);
  const step=Math.min(speed*dt,Math.max(0,dist-.9)),nx=actor.x+v.x*step,nz=actor.z+v.z*step;
  if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.steerStuck=0}
- else{
-  // Recovery: test a small set of nearby escape headings only when the
-  // persistent vector's forward step is blocked. Keep the best safe heading.
-  let escape=null,escapeScore=-Infinity;
-  const turnAngles=[-.95,-.68,-.42,.42,.68,.95,1.35,-1.35,Math.PI];
-  for(const angle of turnAngles){
-   const ex=v.x*Math.cos(angle)+v.z*Math.sin(angle),ez=-v.x*Math.sin(angle)+v.z*Math.cos(angle);
-   const tx=actor.x+ex*step,tz=actor.z+ez*step;
-   if(blocked(tx,tz)||!bridgeClear(actor.x,actor.z,tx,tz))continue;
-   const toward=(ex*desiredX+ez*desiredZ),score=toward+Math.min(4,clearanceAt(tx,tz))*.08;
-   if(score>escapeScore){escapeScore=score;escape={x:ex,z:ez,tx,tz}}
-  }
-  if(escape){
-   const turnBlend=1-Math.exp(-Math.max(0,dt)*5);
-   v.x+=(escape.x-v.x)*turnBlend;v.z+=(escape.z-v.z)*turnBlend;
-   const n=Math.hypot(v.x,v.z)||1;v.x/=n;v.z/=n;actor.steeringVector=v;
-   actor.x=escape.tx;actor.z=escape.tz;actor.steerStuck=0;
-  }else actor.steerStuck=(actor.steerStuck||0)+dt;
- }
+ else actor.steerStuck=(actor.steerStuck||0)+dt;
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
