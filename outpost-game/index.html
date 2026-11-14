@@ -188,6 +188,7 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }// Rake-only 360-degree reactive steering. No grid cells or bridge waypoints.
 const RAKE_RAY_RANGE=12,RAKE_RAY_COUNT=360;
+function clearanceAt(x,z){let d=12;for(const o of obstacles)d=Math.min(d,Math.hypot(x-o.x,z-o.z)-o.r);return d}
 function rakeRaySteer(actor,goal,dt,speed){
  const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);
  if(dist<.01)return;
@@ -213,12 +214,25 @@ function rakeRaySteer(actor,goal,dt,speed){
  const desiredYaw=Math.atan2(v.x,v.z);
  actor.yaw=THREE.MathUtils.damp(actor.yaw??desiredYaw,desiredYaw,7,dt);
  const step=Math.min(speed*dt,Math.max(0,dist-.9)),nx=actor.x+v.x*step,nz=actor.z+v.z*step;
- if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz}
+ if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.steerStuck=0}
  else{
-  // If the forward arc is tight, reinforce the bend without discarding the vector.
-  const side= v.x*desiredZ-v.z*desiredX>=0?1:-1;
-  v.x+=desiredZ*.22*side;v.z-=desiredX*.22*side;
-  const n=Math.hypot(v.x,v.z)||1;v.x/=n;v.z/=n;actor.steeringVector=v;
+  // Recovery: test a small set of nearby escape headings only when the
+  // persistent vector's forward step is blocked. Keep the best safe heading.
+  let escape=null,escapeScore=-Infinity;
+  const turnAngles=[-.95,-.68,-.42,.42,.68,.95,1.35,-1.35,Math.PI];
+  for(const angle of turnAngles){
+   const ex=v.x*Math.cos(angle)+v.z*Math.sin(angle),ez=-v.x*Math.sin(angle)+v.z*Math.cos(angle);
+   const tx=actor.x+ex*step,tz=actor.z+ez*step;
+   if(blocked(tx,tz)||!bridgeClear(actor.x,actor.z,tx,tz))continue;
+   const toward=(ex*desiredX+ez*desiredZ),score=toward+Math.min(4,clearanceAt(tx,tz))*.08;
+   if(score>escapeScore){escapeScore=score;escape={x:ex,z:ez,tx,tz}}
+  }
+  if(escape){
+   const turnBlend=1-Math.exp(-Math.max(0,dt)*5);
+   v.x+=(escape.x-v.x)*turnBlend;v.z+=(escape.z-v.z)*turnBlend;
+   const n=Math.hypot(v.x,v.z)||1;v.x/=n;v.z/=n;actor.steeringVector=v;
+   actor.x=escape.tx;actor.z=escape.tz;actor.steerStuck=0;
+  }else actor.steerStuck=(actor.steerStuck||0)+dt;
  }
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
