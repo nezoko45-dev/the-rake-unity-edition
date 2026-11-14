@@ -192,41 +192,47 @@ function clearanceAt(x,z){let d=12;for(const o of obstacles)d=Math.min(d,Math.hy
 function rakeRaySteer(actor,goal,dt,speed){
  const p=actor,dx=goal.x-p.x,dz=goal.z-p.z,dist=Math.hypot(dx,dz);
  if(dist<.01)return;
- const forwardX=dx/dist,forwardZ=dz/dist,probe=Math.min(speed*Math.max(dt,.016),.55);
- // Match FPE's proven vector steering: score clear candidate vectors by
- // target alignment, real progress, and obstacle clearance; no raycasts.
- let bestX=0,bestZ=0,bestScore=-Infinity;
- for(let k=0;k<32;k++){
-  const a=k*Math.PI*2/32,vx=Math.sin(a),vz=Math.cos(a),tx=p.x+vx*probe,tz=p.z+vz*probe;
-  if(blocked(tx,tz)||!bridgeClear(p.x,p.z,tx,tz))continue;
-  let clearance=3;
-  for(const o of obstacles){
-   const gap=Math.hypot(tx-o.x,tz-o.z)-o.r;
-   if(gap<clearance)clearance=gap;
-  }
-  const alignment=vx*forwardX+vz*forwardZ;
-  const progress=dist-Math.hypot(goal.x-tx,goal.z-tz);
-  const score=alignment*2.2+progress*2+Math.min(Math.max(0,clearance),2.2)*.9;
-  if(score>bestScore){bestScore=score;bestX=vx;bestZ=vz}
- }
- if(bestScore===-Infinity){p.steerStuck=(p.steerStuck||0)+dt;return}
- // Persist and smoothly bend the steering vector toward the best clear
- // candidate, exactly like FPE's curvedVector integration.
+ const gx=dx/dist,gz=dz/dist;
+ // One continuous steering vector: target attraction plus smooth obstacle
+ // repulsion. No compass sampling, ray scans, or discrete direction picks.
  let v=p.steeringVector;
- if(!v||!Number.isFinite(v.x)||!Number.isFinite(v.z)||Math.hypot(v.x,v.z)<.001)v={x:forwardX,z:forwardZ};
- const blend=1-Math.exp(-Math.min(dt,.1)*4.2);
- v.x+=(bestX-v.x)*blend;v.z+=(bestZ-v.z)*blend;
+ if(!v||!Number.isFinite(v.x)||!Number.isFinite(v.z)||Math.hypot(v.x,v.z)<.001)v={x:gx,z:gz};
+ let fx=gx*1.35,fz=gz*1.35;
+ for(const o of obstacles){
+  const ox=p.x-o.x,oz=p.z-o.z,d=Math.hypot(ox,oz)||.001;
+  const safe=o.r+7.5;
+  if(d>=safe)continue;
+  const nx=ox/d,nz=oz/d,urgency=(safe-d)/safe;
+  // Repel radially, then add a gentle goal-compatible tangent so the
+  // vector flows around the object's edge instead of stopping head-on.
+  let tx=-nz,tz=nx;
+  if(tx*gx+tz*gz<0){tx=-tx;tz=-tz}
+  const repulse=5.8*urgency*urgency;
+  const tangent=2.1*urgency;
+  fx+=nx*repulse+tx*tangent;
+  fz+=nz*repulse+tz*tangent;
+ }
+ const blend=1-Math.exp(-Math.max(0,dt)*2.8);
+ v.x+=(fx-v.x)*blend;v.z+=(fz-v.z)*blend;
  let len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;
+ // Keep the vector continuous; collision check only prevents penetration.
  const step=Math.min(speed*dt,Math.max(0,dist-.9));
  let nx=p.x+v.x*step,nz=p.z+v.z*step;
- // Validate the smoothed vector; if it would collide, use this frame's
- // collision-free scored vector and retain it as the persistent heading.
  if(blocked(nx,nz)||!bridgeClear(p.x,p.z,nx,nz)){
-  v.x=bestX;v.z=bestZ;nx=p.x+v.x*step;nz=p.z+v.z*step;
+  // Strengthen repulsion in the exact blocked direction and persist the
+  // resulting bend, rather than selecting a new compass heading.
+  let rx=0,rz=0;
+  for(const o of obstacles){
+   const ox=p.x-o.x,oz=p.z-o.z,d=Math.hypot(ox,oz)||.001,safe=o.r+8;
+   if(d>=safe)continue;const w=(safe-d)/safe;
+   rx+=ox/d*w;rz+=oz/d*w;
+  }
+  v.x+=rx*2.4;v.z+=rz*2.4;len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;
+  nx=p.x+v.x*step;nz=p.z+v.z*step;
   if(blocked(nx,nz)||!bridgeClear(p.x,p.z,nx,nz)){p.steerStuck=(p.steerStuck||0)+dt;return}
  }
  p.steeringVector={x:v.x,z:v.z};p.x=nx;p.z=nz;p.steerStuck=0;
- const yaw=Math.atan2(v.x,v.z);p.yaw=THREE.MathUtils.damp(p.yaw??yaw,yaw,7,dt);
+ const yaw=Math.atan2(v.x,v.z);p.yaw=THREE.MathUtils.damp(p.yaw??yaw,yaw,5.2,dt);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
