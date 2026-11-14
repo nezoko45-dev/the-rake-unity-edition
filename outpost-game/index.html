@@ -195,48 +195,58 @@ function rakeRaySteer(actor,goal,dt,speed){
  const desiredX=dx/dist,desiredZ=dz/dist;
  let v=actor.steeringVector;
  if(!v||!Number.isFinite(v.x)||!Number.isFinite(v.z)||Math.hypot(v.x,v.z)<.001)v={x:desiredX,z:desiredZ};
- // Predict the vector's forward corridor and build a tangent/away force.
- let forceX=desiredX*1.1,forceZ=desiredZ*1.1;
- const look=Math.min(11,Math.max(4,dist)),vx=v.x,vz=v.z;
+ // Persistent obstacle-follow state: once an obstacle is engaged, commit to
+ // its tangent and keep following its perimeter until its rear is cleared.
+ let engage=null;
  for(const o of obstacles){
-  const ox=o.x-actor.x,oz=o.z-actor.z,along=ox*vx+oz*vz;
-  if(along<-.2||along>look+o.r)continue;
-  const cx=actor.x+vx*Math.max(0,along),cz=actor.z+vz*Math.max(0,along);
-  // Correct outward normal: from obstacle center toward the actor's corridor.
-  const nx=cx-o.x,nz=cz-o.z,perp=Math.hypot(nx,nz),radius=o.r+3.1;
-  if(perp>=radius)continue;
-  const urgency=(radius-perp)/radius;
-  const side=(vx*nz-vz*nx)>=0?-1:1;
-  forceX+=(nx/(perp||1))*urgency*4.0+vz*side*(urgency*3.4+0.5);
-  forceZ+=(nz/(perp||1))*urgency*4.0-vx*side*(urgency*3.4+0.5);
+  const ox=o.x-actor.x,oz=o.z-actor.z,along=ox*v.x+oz*v.z;
+  const lateral=Math.abs(v.x*oz-v.z*ox),radius=o.r+3.4;
+  if(along>-.8&&along<Math.max(12,dist)&&lateral<radius+2&&(!engage||along<engage.along))engage={o,along,lateral,radius};
  }
- const blend=1-Math.exp(-Math.max(0,dt)*3.0);
- v.x+=(forceX-v.x)*blend;v.z+=(forceZ-v.z)*blend;
+ let fx=desiredX*.8,fz=desiredZ*.8;
+ if(engage){
+  const o=engage.o,rx=actor.x-o.x,rz=actor.z-o.z,r=Math.hypot(rx,rz)||1;
+  const nx=rx/r,nz=rz/r;
+  // Tangent chosen to preserve target progress; keep it latched while circling.
+  let side=actor.steerObstacleId===o.id?actor.steerObstacleSide:0;
+  if(!side)side=(nx*desiredZ-nz*desiredX)>=0?1:-1;
+  actor.steerObstacleId=o.id;actor.steerObstacleSide=side;
+  const tx=-nz*side,tz=nx*side;
+  const forwardDot=tx*desiredX+tz*desiredZ;
+  if(forwardDot<-.12){side=-side;actor.steerObstacleSide=side}
+  const tangentX=-nz*side,tangentZ=nx*side;
+  // Strong tangent dominates goal attraction, producing a long perimeter arc.
+  fx=desiredX*.22+tangentX*2.8+nx*.55;
+  fz=desiredZ*.22+tangentZ*2.8+nz*.55;
+  // Release only after the obstacle is behind us and the path has opened.
+  const rear=rx*v.x+rz*v.z < -(o.r+2.8);
+  if(rear&&engage.lateral>engage.radius+1){actor.steerObstacleId=null;actor.steerObstacleSide=0}
+ }else{actor.steerObstacleId=null;actor.steerObstacleSide=0}
+ const blend=1-Math.exp(-Math.max(0,dt)*(engage?1.65:2.2));
+ v.x+=(fx-v.x)*blend;v.z+=(fz-v.z)*blend;
  let len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;actor.steeringVector=v;
- // Collision-safe continuous steering: if the integrated vector would enter
- // an obstacle, bend it along the nearest safe tangent immediately.
+ // Swept collision validation; progressively turn the persistent vector along
+ // the obstacle tangent until its whole movement segment is clear.
  const step=Math.min(speed*dt,Math.max(0,dist-.9));
- let nx=actor.x+v.x*step,nz=actor.z+v.z*step;
+ let moveX=v.x,moveZ=v.z,nx=actor.x+moveX*step,nz=actor.z+moveZ*step;
  if(blocked(nx,nz)||!bridgeClear(actor.x,actor.z,nx,nz)){
   let best=null,bestScore=-Infinity;
-  for(let k=-12;k<=12;k++){
-   if(k===0)continue;
-   const angle=k*Math.PI/24,ex=v.x*Math.cos(angle)+v.z*Math.sin(angle),ez=-v.x*Math.sin(angle)+v.z*Math.cos(angle);
+  const angles=[-.20,.20,-.38,.38,-.58,.58,-.82,.82,-1.1,1.1,-1.45,1.45,-1.8,1.8,Math.PI];
+  for(const angle of angles){
+   const ex=v.x*Math.cos(angle)+v.z*Math.sin(angle),ez=-v.x*Math.sin(angle)+v.z*Math.cos(angle);
    const tx=actor.x+ex*step,tz=actor.z+ez*step;
    if(blocked(tx,tz)||!bridgeClear(actor.x,actor.z,tx,tz))continue;
-   const progress=ex*desiredX+ez*desiredZ,clear=clearanceAt(tx,tz);
-   const score=progress+Math.min(5,Math.max(0,clear))*.035;
+   const prog=ex*desiredX+ez*desiredZ,clear=Math.min(8,Math.max(0,clearanceAt(tx,tz)));
+   const score=prog+clear*.025;
    if(score>bestScore){bestScore=score;best={x:ex,z:ez,tx,tz}}
   }
   if(!best){actor.steerStuck=(actor.steerStuck||0)+dt;return}
-  // Update the persistent vector toward the collision-free tangent, not a
-  // one-frame sidestep; this is the direction used on subsequent frames.
-  v.x+=(best.x-v.x)*(1-Math.exp(-dt*8));v.z+=(best.z-v.z)*(1-Math.exp(-dt*8));
+  moveX=best.x;moveZ=best.z;nx=best.tx;nz=best.tz;
+  v.x+=(moveX-v.x)*(1-Math.exp(-dt*2.2));v.z+=(moveZ-v.z)*(1-Math.exp(-dt*2.2));
   len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;actor.steeringVector=v;
-  nx=best.tx;nz=best.tz;
  }
  actor.x=nx;actor.z=nz;actor.steerStuck=0;
- const yaw=Math.atan2(v.x,v.z);actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,7,dt);
+ const yaw=Math.atan2(v.x,v.z);actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,5.5,dt);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
