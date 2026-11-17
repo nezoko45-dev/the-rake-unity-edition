@@ -186,53 +186,93 @@ function updateRakeHeadLook(dt){
  // Three.js mixer updates bone.quaternion before this; layer a local-Y offset after animation.
  const q=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),headBone.userData.trackYaw);
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
-}// Rake-only 360-degree reactive steering. No grid cells or bridge waypoints.
-const RAKE_RAY_RANGE=12,RAKE_RAY_COUNT=360;
-function clearanceAt(x,z){let d=12;for(const o of obstacles)d=Math.min(d,Math.hypot(x-o.x,z-o.z)-o.r);return d}
-function rakeRaySteer(actor,goal,dt,speed){
- const p=actor,dx=goal.x-p.x,dz=goal.z-p.z,dist=Math.hypot(dx,dz);
- if(dist<.01)return;
- const gx=dx/dist,gz=dz/dist;
- // One continuous steering vector: target attraction plus smooth obstacle
- // repulsion. No compass sampling, ray scans, or discrete direction picks.
- let v=p.steeringVector;
- if(!v||!Number.isFinite(v.x)||!Number.isFinite(v.z)||Math.hypot(v.x,v.z)<.001)v={x:gx,z:gz};
- let fx=gx*1.35,fz=gz*1.35;
+}// Rake-only 32-direction radial probing plus one direct-to-target vector.
+// Each candidate measures forward clearance against the live obstacle set.
+// The direct target vector wins whenever its look-ahead corridor is clear;
+// otherwise the best radial direction balances target alignment, clearance,
+// and continuity with the previous heading to prevent rapid direction flips.
+const RAKE_RAY_RANGE=12,RAKE_RAY_COUNT=32;
+function rakeRayClearance(actor,dirX,dirZ,maxRange){
+ let clearance=maxRange;
  for(const o of obstacles){
-  const ox=p.x-o.x,oz=p.z-o.z,d=Math.hypot(ox,oz)||.001;
-  const safe=o.r+7.5;
-  if(d>=safe)continue;
-  const nx=ox/d,nz=oz/d,urgency=(safe-d)/safe;
-  // Repel radially, then add a gentle goal-compatible tangent so the
-  // vector flows around the object's edge instead of stopping head-on.
-  let tx=-nz,tz=nx;
-  if(tx*gx+tz*gz<0){tx=-tx;tz=-tz}
-  const repulse=5.8*urgency*urgency;
-  const tangent=2.1*urgency;
-  fx+=nx*repulse+tx*tangent;
-  fz+=nz*repulse+tz*tangent;
+  const ox=o.x-actor.x,oz=o.z-actor.z;
+  const projection=ox*dirX+oz*dirZ;
+  if(projection<=0||projection>maxRange+o.r+1)continue;
+  const perpendicularSq=Math.max(0,ox*ox+oz*oz-projection*projection);
+  const radius=o.r+.95;
+  if(perpendicularSq>=radius*radius)continue;
+  const entry=projection-Math.sqrt(Math.max(0,radius*radius-perpendicularSq));
+  if(entry>=0&&entry<clearance)clearance=entry;
  }
- const blend=1-Math.exp(-Math.max(0,dt)*2.8);
- v.x+=(fx-v.x)*blend;v.z+=(fz-v.z)*blend;
- let len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;
- // Keep the vector continuous; collision check only prevents penetration.
- const step=Math.min(speed*dt,Math.max(0,dist-.9));
- let nx=p.x+v.x*step,nz=p.z+v.z*step;
- if(blocked(nx,nz)||!bridgeClear(p.x,p.z,nx,nz)){
-  // Strengthen repulsion in the exact blocked direction and persist the
-  // resulting bend, rather than selecting a new compass heading.
-  let rx=0,rz=0;
-  for(const o of obstacles){
-   const ox=p.x-o.x,oz=p.z-o.z,d=Math.hypot(ox,oz)||.001,safe=o.r+8;
-   if(d>=safe)continue;const w=(safe-d)/safe;
-   rx+=ox/d*w;rz+=oz/d*w;
+ return clearance;
+}
+function rakeRaySteer(actor,goal,dt,speed){
+ const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);
+ if(dist<.01)return;
+ const targetX=dx/dist,targetZ=dz/dist;
+ const lookAhead=Math.min(RAKE_RAY_RANGE,Math.max(2,dist));
+ const targetClearance=rakeRayClearance(actor,targetX,targetZ,lookAhead);
+ let chosenX=targetX,chosenZ=targetZ,chosenClearance=targetClearance;
+ // Candidate 33: the exact target direction. Prefer it whenever the whole
+ // look-ahead segment is unobstructed.
+ if(targetClearance<lookAhead-.2){
+  const previous=actor.steeringVector&&Number.isFinite(actor.steeringVector.x)&&Number.isFinite(actor.steeringVector.z)
+   ?actor.steeringVector:{x:targetX,z:targetZ};
+  let bestScore=-Infinity,best=null;
+  // Candidates 1–32: evenly spaced radial directions, 11.25 degrees apart.
+  for(let i=0;i<RAKE_RAY_COUNT;i++){
+   const angle=i*(Math.PI*2/RAKE_RAY_COUNT);
+   const vx=Math.cos(angle),vz=Math.sin(angle);
+   const clearance=rakeRayClearance(actor,vx,vz,RAKE_RAY_RANGE);
+   const step=Math.min(speed*dt,Math.max(0,dist-.9));
+   if(clearance<Math.min(.85,step+.12))continue;
+   const alignment=vx*targetX+vz*targetZ;
+   const continuity=vx*previous.x+vz*previous.z;
+   const clearanceScore=Math.min(1,clearance/RAKE_RAY_RANGE);
+   // Alignment makes progress; clearance favors safer corridors; continuity
+   // adds hysteresis so nearly equal neighboring probes do not cause jitter.
+   const score=alignment*3.4+clearanceScore*1.45+continuity*1.9;
+   if(score>bestScore){bestScore=score;best={x:vx,z:vz,clearance}}
   }
-  v.x+=rx*2.4;v.z+=rz*2.4;len=Math.hypot(v.x,v.z)||1;v.x/=len;v.z/=len;
-  nx=p.x+v.x*step;nz=p.z+v.z*step;
-  if(blocked(nx,nz)||!bridgeClear(p.x,p.z,nx,nz)){p.steerStuck=(p.steerStuck||0)+dt;return}
+  if(best){chosenX=best.x;chosenZ=best.z;chosenClearance=best.clearance}
+  else{
+   // No fully usable probe: choose the radial direction with the greatest
+   // clearance, still breaking ties toward the target and prior heading.
+   let bestScore=-Infinity;
+   for(let i=0;i<RAKE_RAY_COUNT;i++){
+    const angle=i*(Math.PI*2/RAKE_RAY_COUNT),vx=Math.cos(angle),vz=Math.sin(angle);
+    const clearance=rakeRayClearance(actor,vx,vz,RAKE_RAY_RANGE);
+    const alignment=vx*targetX+vz*targetZ;
+    const continuity=vx*previous.x+vz*previous.z;
+    const score=clearance+alignment*.45+continuity*.3;
+    if(score>bestScore){bestScore=score;chosenX=vx;chosenZ=vz;chosenClearance=clearance}
+   }
+  }
  }
- p.steeringVector={x:v.x,z:v.z};p.x=nx;p.z=nz;p.steerStuck=0;
- const yaw=Math.atan2(v.x,v.z);p.yaw=THREE.MathUtils.damp(p.yaw??yaw,yaw,5.2,dt);
+ // Smoothly blend back toward the target when its corridor opens, and smooth
+ // transitions between adjacent radial probes without abrupt heading snaps.
+ const blend=1-Math.exp(-Math.max(0,dt)*(targetClearance>=lookAhead-.2?5.5:3.8));
+ let sx=actor.steeringVector?.x??chosenX,sz=actor.steeringVector?.z??chosenZ;
+ sx+=(chosenX-sx)*blend;sz+=(chosenZ-sz)*blend;
+ let length=Math.hypot(sx,sz)||1;sx/=length;sz/=length;
+ const step=Math.min(speed*dt,Math.max(0,dist-.9),Math.max(0,chosenClearance-.22));
+ if(step>.001){
+  let nx=actor.x+sx*step,nz=actor.z+sz*step;
+  // A final short-segment guard protects against obstacles moving/chunk updates
+  // between probe selection and movement.
+  if(!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){
+   actor.x=nx;actor.z=nz;
+  }else{
+   // Fall back to the selected probe direction for this frame if smoothing
+   // would clip a corner.
+   const safeStep=Math.min(speed*dt,Math.max(0,dist-.9),Math.max(0,chosenClearance-.22));
+   nx=actor.x+chosenX*safeStep;nz=actor.z+chosenZ*safeStep;
+   if(safeStep>.001&&!blocked(nx,nz)&&bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;sx=chosenX;sz=chosenZ}
+  }
+ }
+ actor.steeringVector={x:sx,z:sz};
+ const yaw=Math.atan2(sx,sz);
+ actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,5.2,dt);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
