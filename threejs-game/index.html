@@ -171,33 +171,14 @@ function movePath(actor,speed,dt){
  const goal=actor?.pathGoal;if(!actor?.pos||!actor.group||!goal)return false;
  const p=actor.pos,dx=goal.x-p.x,dz=goal.z-p.z,dist=Math.hypot(dx,dz);if(dist<.5)return false;
  const ud=actor.userData||(actor.userData={}),desired=Math.atan2(dx,dz);
- const heading=ud.curvedVector||{x:dx/dist,z:dz/dist};
- const probeDistances=[.45,.9,1.5,2.4,3.6,5,7,9].map(d=>Math.min(d,dist));
- const candidates=[];
- // Exactly 32 evenly spaced probing vectors: 360 degrees / 32 = 11.25 degrees.
- for(let i=0;i<32;i++){
-  const a=i*(Math.PI*2/32);
-  candidates.push({x:Math.sin(a),z:Math.cos(a),target:false});
- }
- // The 33rd vector always points directly at the current target.
- candidates.push({x:dx/dist,z:dz/dist,target:true});
  let best=null,bestScore=-Infinity;
- for(const v of candidates){
-  let clear=0,blocked=0,reach=0,firstHit=false;
-  for(const d of probeDistances){
-   if(rakeBridgeClear(p.x,p.z,p.x+v.x*d,p.z+v.z*d)){clear++;reach=d}
-   else{blocked++;if(!firstHit)firstHit=true}
-  }
-  // Reject directions that are already obstructed immediately in front.
-  if(!rakeBridgeClear(p.x,p.z,p.x+v.x*.35,p.z+v.z*.35))continue;
-  const targetGain=Math.max(-3,Math.min(3,dist-Math.hypot(goal.x-(p.x+v.x*reach),goal.z-(p.z+v.z*reach))));
-  const targetAlignment=v.x*Math.sin(desired)+v.z*Math.cos(desired);
-  const smooth=v.x*heading.x+v.z*heading.z;
-  // The direct target vector wins when clear; otherwise the 32 probes
-  // compete by clearance, progress toward target, and continuity.
-  const directBonus=v.target&&clear===probeDistances.length?12:0;
-  const score=clear*3-blocked*5+targetGain*4+targetAlignment*7+smooth*2+directBonus;
-  if(score>bestScore){bestScore=score;best={x:v.x,z:v.z}}
+ for(let deg=0;deg<360;deg+=3){const a=deg*Math.PI/180,vx=Math.sin(a),vz=Math.cos(a);
+  let clear=0,blocked=0,reach=0;for(const d of [.45,.9,1.5,2.4,3.6,5,7,9]){if(rakeBridgeClear(p.x,p.z,p.x+vx*d,p.z+vz*d)){clear++;reach=d}else blocked++}
+  if(!rakeBridgeClear(p.x,p.z,p.x+vx*.35,p.z+vz*.35))continue;
+  const targetGain=Math.max(-3,Math.min(3,dist-Math.hypot(goal.x-(p.x+vx*reach),goal.z-(p.z+vz*reach))));
+  const heading=ud.curvedVector||{x:dx/dist,z:dz/dist},smooth=vx*heading.x+vz*heading.z;
+  const score=clear*3-blocked*5+targetGain*4+(vx*Math.sin(desired)+vz*Math.cos(desired))*7+smooth*2;
+  if(score>bestScore){bestScore=score;best={x:vx,z:vz}}
  }
  if(!best)return false;
  const current=ud.curvedVector||(ud.curvedVector={x:best.x,z:best.z}),blend=1-Math.exp(-dt*4.2);
