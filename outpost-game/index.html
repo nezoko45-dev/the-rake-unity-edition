@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE RAKE: FOREST FREEPLAY</title>
 <style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#080b10;color:#e8edf2;font:14px system-ui}canvas{display:block}#hud,#help,#notice{position:fixed;background:#071019d9;border:1px solid #52708066;border-radius:9px;padding:12px;z-index:2}#hud{top:14px;left:14px;min-width:210px}#help{bottom:14px;left:14px;color:#bac8d2;line-height:1.6}#notice{top:18%;left:50%;transform:translateX(-50%);display:none;color:#ffd5a0}#cross{position:fixed;left:50%;top:50%;width:7px;height:7px;border:1px solid white;border-radius:50%}#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#020509df;z-index:5;text-align:center}#panel{max-width:500px;padding:30px}button{padding:12px 20px;border:0;border-radius:6px;background:#d8a25e;font-weight:800;cursor:pointer}.debug-toggle{margin-top:9px;padding:6px 9px;border:1px solid #668397;border-radius:5px;background:#172633;color:#dceaf2;font-size:11px;font-weight:800;letter-spacing:.04em}.debug-toggle.active{background:#24533a;border-color:#68d99a;color:#baffd1}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script></head><body>
-<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE VECTORS: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
+<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE PARTICLES: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click mouse lock<br>Freeplay · Explore the forest</div><div id="cross"></div><div id="notice"></div>
 <div id="overlay"><div id="panel"><h1>THE RAKE: FOREST FREEPLAY</h1><p>No objectives. No missions. Just freeplay—explore while the hunter roams and reacts to you.</p><p><small>Same Rake model and soundtrack assets; new map and AI behavior.</small></p><button id="start">ENTER THE FOREST</button></div></div>
 <script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
@@ -60,7 +60,7 @@ const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState
 function playRakeHurtSound(){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),now=ctx.currentTime;const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(260,now);osc.frequency.exponentialRampToValueAtTime(72,now+.42);filter.type='lowpass';filter.frequency.value=950;gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.22,now+.035);gain.gain.exponentialRampToValueAtTime(.0001,now+.62);osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.65);setTimeout(()=>ctx.close(),900)}catch(e){}}
 function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math.max(0,rakeHP-45);rakeDamageCd=3;rakeHurtUntil=elapsed+1.15;rakeSlowUntil=elapsed+1.8;attackAnimUntil=0;anim(/hurt1|hurt/i);if(action)action.timeScale=1;playRakeHurtSound();notice(source+' hit THE RAKE (-45) · '+rakeHP+' HP');return true}
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
-addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'){navDebug=!navDebug;notice('Navigation ray gizmos '+(navDebug?'ON':'OFF'))}if(e.code==='KeyV')toggleRakeVectorGizmos()});addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'){navDebug=!navDebug;notice('Navigation ray gizmos '+(navDebug?'ON':'OFF'))}if(e.code==='KeyV')toggleRakeParticleGizmos()});addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('mousedown',e=>{if(e.button===0)playerRakeHit()});
 let navDebugRefresh=0;
 function drawNavDebug(){
@@ -95,7 +95,7 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 
 // Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
 // Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
-let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];let rakeVectorDebug=false;const rakeVectorDebugGroup=new THREE.Group();scene.add(rakeVectorDebugGroup);function clearRakeVectorGizmos(){for(const child of rakeVectorDebugGroup.children){child.geometry?.dispose();if(Array.isArray(child.material))child.material.forEach(m=>m.dispose());else child.material?.dispose()}rakeVectorDebugGroup.clear()}const rakeVectorButton=document.querySelector("#rake-vector-toggle");function toggleRakeVectorGizmos(){rakeVectorDebug=!rakeVectorDebug;rakeVectorButton.textContent="RAKE VECTORS: "+(rakeVectorDebug?"ON":"OFF");rakeVectorButton.classList.toggle("active",rakeVectorDebug);if(!rakeVectorDebug){clearRakeVectorGizmos();notice("Rake vector gizmos OFF")}else notice("Rake vector gizmos ON")}rakeVectorButton.addEventListener("click",toggleRakeVectorGizmos);const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
@@ -186,95 +186,34 @@ function updateRakeHeadLook(dt){
  // Three.js mixer updates bone.quaternion before this; layer a local-Y offset after animation.
  const q=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),headBone.userData.trackYaw);
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
-}// Rake-only vector steering using collision bounds; no raycasts or ray samples.
-// Each candidate vector is checked by sweeping the Rake's circular ground bound
-// against the obstacle bounds. The target vector is evaluated alongside 32 radial vectors.
-const RAKE_COLLISION_RADIUS=1.15,RAKE_VECTOR_RANGE=12,RAKE_VECTOR_COUNT=32;
-function rakeVectorClearance(actor,dirX,dirZ,maxRange){
- let clearance=maxRange;
- // Exact swept-circle vs obstacle-circle test. This is geometric bound testing,
- // not a raycast: expand each obstacle by the Rake radius and solve the
- // closest forward contact distance along the candidate movement vector.
- for(const o of obstacles){
-  const ox=o.x-actor.x,oz=o.z-actor.z;
-  const expanded=o.r+RAKE_COLLISION_RADIUS;
-  const projection=ox*dirX+oz*dirZ;
-  const perpendicularSq=ox*ox+oz*oz-projection*projection;
-  if(perpendicularSq>=expanded*expanded)continue;
-  const entry=projection-Math.sqrt(Math.max(0,expanded*expanded-perpendicularSq));
-  const exit=projection+Math.sqrt(Math.max(0,expanded*expanded-perpendicularSq));
-  if(exit<0||entry>maxRange)continue;
-  const contact=Math.max(0,entry);
-  if(contact<clearance)clearance=contact;
- }
- return clearance;
+}// Particle navigation: collision-bound particles connect into a visible trail the Rake follows.
+const RAKE_COLLISION_RADIUS=1.15,RAKE_PARTICLE_RING_COUNT=8,RAKE_PARTICLE_MARGIN=.65;
+const rakeParticleGroup=new THREE.Group();scene.add(rakeParticleGroup);let rakeParticleDebugOn=false,rakeParticleDrawAt=0;
+const rakeParticleButton=document.querySelector("#rake-vector-toggle");
+function clearRakeParticleGizmos(){for(const c of rakeParticleGroup.children){c.geometry?.dispose();c.material?.dispose()}rakeParticleGroup.clear()}
+function toggleRakeParticleGizmos(){rakeParticleDebugOn=!rakeParticleDebugOn;rakeParticleButton.textContent="RAKE PARTICLES: "+(rakeParticleDebugOn?"ON":"OFF");rakeParticleButton.classList.toggle("active",rakeParticleDebugOn);if(!rakeParticleDebugOn)clearRakeParticleGizmos();else rakeParticleDrawAt=0;notice("Rake particle gizmos "+(rakeParticleDebugOn?"ON":"OFF"))}
+rakeParticleButton.addEventListener("click",toggleRakeParticleGizmos);
+function rakeSegmentClear(a,b,obs){const vx=b.x-a.x,vz=b.z-a.z,l2=vx*vx+vz*vz;for(const o of obs){const r=o.r+RAKE_COLLISION_RADIUS+.12,t=l2>1e-8?THREE.MathUtils.clamp(((o.x-a.x)*vx+(o.z-a.z)*vz)/l2,0,1):0,dx=a.x+vx*t-o.x,dz=a.z+vz*t-o.z;if(dx*dx+dz*dz<r*r)return false}return true}
+function rakeBuildParticleTrail(actor,goal){
+ const sx=actor.x,sz=actor.z,dx=goal.x-sx,dz=goal.z-sz,len=Math.hypot(dx,dz);if(len<.15)return null;
+ const relevant=obstacles.map(o=>({o,d:Math.hypot(o.x-(sx+dx*.5),o.z-(sz+dz*.5))})).filter(v=>v.d<len*.5+25&&Math.hypot(v.o.x-sx,v.o.z-sz)<58).sort((a,b)=>a.d-b.d).slice(0,30).map(v=>v.o);
+ const nodes=[{x:sx,z:sz,type:"start"},{x:goal.x,z:goal.z,type:"goal"}];
+ for(const o of relevant){const r=o.r+RAKE_COLLISION_RADIUS+RAKE_PARTICLE_MARGIN;for(let i=0;i<RAKE_PARTICLE_RING_COUNT;i++){const a=i*Math.PI*2/RAKE_PARTICLE_RING_COUNT,p={x:o.x+Math.cos(a)*r,z:o.z+Math.sin(a)*r,type:"particle"};if(relevant.every(q=>Math.hypot(p.x-q.x,p.z-q.z)>=q.r+RAKE_COLLISION_RADIUS+.12))nodes.push(p)}}
+ const n=nodes.length,edges=Array.from({length:n},()=>[]);for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)if(rakeSegmentClear(nodes[i],nodes[j],relevant)){const w=Math.hypot(nodes[j].x-nodes[i].x,nodes[j].z-nodes[i].z);edges[i].push([j,w]);edges[j].push([i,w])}
+ const dist=Array(n).fill(Infinity),prev=Array(n).fill(-1),used=Array(n).fill(false);dist[0]=0;
+ for(let k=0;k<n;k++){let u=-1,best=Infinity;for(let i=0;i<n;i++)if(!used[i]&&dist[i]<best){best=dist[i];u=i}if(u<0||u===1)break;used[u]=true;for(const [v,w] of edges[u])if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u}}
+ if(!Number.isFinite(dist[1]))return null;const ids=[];for(let at=1;at!==-1;at=prev[at]){ids.push(at);if(at===0)break}ids.reverse();if(ids[0]!==0)return null;
+ const way=ids.map(i=>new THREE.Vector3(nodes[i].x,0,nodes[i].z)),points=[];for(let i=0;i<way.length-1;i++){const p=way[i],q=way[i+1],steps=Math.max(1,Math.ceil(p.distanceTo(q)/.5));for(let j=0;j<steps;j++)points.push(p.clone().lerp(q,j/steps))}points.push(way[way.length-1].clone());
+ return{points,particles:nodes.filter(p=>p.type==="particle"),obstacles:relevant,goalX:goal.x,goalZ:goal.z,createdAt:elapsed};
 }
-function rakeVectorSteer(actor,goal,dt,speed){
- const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);
- if(dist<.01)return;
- const targetX=dx/dist,targetZ=dz/dist;
- const lookAhead=Math.min(RAKE_VECTOR_RANGE,Math.max(2,dist));
- const targetClearance=rakeVectorClearance(actor,targetX,targetZ,lookAhead);
- let chosenX=targetX,chosenZ=targetZ,chosenClearance=targetClearance;
- const previous=actor.steeringVector&&Number.isFinite(actor.steeringVector.x)&&Number.isFinite(actor.steeringVector.z)
-  ?actor.steeringVector:{x:targetX,z:targetZ};
- // Prefer the exact target vector when its swept collision bounds leave a
- // useful corridor. Otherwise compare all 32 evenly spaced radial vectors.
- if(targetClearance<Math.min(2.5,lookAhead)-.15){
-  let bestScore=-Infinity,best=null;
-  for(let i=0;i<RAKE_VECTOR_COUNT;i++){
-   const angle=i*(Math.PI*2/RAKE_VECTOR_COUNT);
-   const vx=Math.cos(angle),vz=Math.sin(angle);
-   const clearance=rakeVectorClearance(actor,vx,vz,RAKE_VECTOR_RANGE);
-   if(clearance<.4)continue;
-   const alignment=vx*targetX+vz*targetZ;
-   const continuity=vx*previous.x+vz*previous.z;
-   const clearanceScore=Math.min(1,clearance/RAKE_VECTOR_RANGE);
-   const score=alignment*3.4+clearanceScore*1.45+continuity*1.9;
-   if(score>bestScore){bestScore=score;best={x:vx,z:vz,clearance}}
-  }
-  if(best){chosenX=best.x;chosenZ=best.z;chosenClearance=best.clearance}
-  else{
-   // If every direction is constrained, select the direction with the most
-   // remaining collision-bound clearance, with target/heading tie-breakers.
-   let bestScore=-Infinity;
-   for(let i=0;i<RAKE_VECTOR_COUNT;i++){
-    const angle=i*(Math.PI*2/RAKE_VECTOR_COUNT),vx=Math.cos(angle),vz=Math.sin(angle);
-    const clearance=rakeVectorClearance(actor,vx,vz,RAKE_VECTOR_RANGE);
-    const alignment=vx*targetX+vz*targetZ,continuity=vx*previous.x+vz*previous.z;
-    const score=clearance+alignment*.45+continuity*.3;
-    if(score>bestScore){bestScore=score;chosenX=vx;chosenZ=vz;chosenClearance=clearance}
-   }
-  }
- }
- // Smooth the selected direction to avoid abrupt vector switching.
- const blend=1-Math.exp(-Math.max(0,dt)*(targetClearance>=Math.min(2.5,lookAhead)-.15?5.5:3.8));
- let sx=actor.steeringVector?.x??chosenX,sz=actor.steeringVector?.z??chosenZ;
- sx+=(chosenX-sx)*blend;sz+=(chosenZ-sz)*blend;
- let length=Math.hypot(sx,sz)||1;sx/=length;sz/=length;
- let step=Math.min(speed*dt,Math.max(0,dist-.9),Math.max(0,chosenClearance-.18));
- // Validate the actual swept Rake collision bound before committing movement.
- let safeDistance=rakeVectorClearance(actor,sx,sz,step);
- step=Math.min(step,safeDistance);
- if(step>.001){actor.x+=sx*step;actor.z+=sz*step}
- actor.steeringVector={x:sx,z:sz};
- actor.rakeVectorDebugData={targetX,targetZ,chosenX,chosenZ,targetClearance,chosenClearance,
-  probes:Array.from({length:RAKE_VECTOR_COUNT},(_,i)=>{
-   const angle=i*(Math.PI*2/RAKE_VECTOR_COUNT),x=Math.cos(angle),z=Math.sin(angle);
-   return{x,z,clearance:rakeVectorClearance(actor,x,z,RAKE_VECTOR_RANGE)}
-  })};
- const yaw=Math.atan2(sx,sz);
- actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,5.2,dt);
+function rakeParticleSteer(actor,goal,dt,speed){
+ let path=actor.particleTrail;if(!path||Math.hypot(path.goalX-goal.x,path.goalZ-goal.z)>2.1||elapsed-path.createdAt>.85||actor.particleReplan){const next=rakeBuildParticleTrail(actor,goal);if(!next){actor.particleReplan=true;return}actor.particleTrail=path=next;actor.particlePathIndex=0;actor.particleReplan=false}
+ const pts=path.points;let nearest=actor.particlePathIndex||0,best=Infinity;for(let i=Math.max(0,nearest-3);i<pts.length;i++){const d=Math.hypot(pts[i].x-actor.x,pts[i].z-actor.z);if(d<best){best=d;nearest=i}}actor.particlePathIndex=nearest;
+ let targetI=nearest,walked=0;while(targetI<pts.length-1&&walked<2.3){walked+=pts[targetI].distanceTo(pts[targetI+1]);targetI++}
+ const guide=pts[targetI],dx=guide.x-actor.x,dz=guide.z-actor.z,d=Math.hypot(dx,dz);if(d>.04){const step=Math.min(speed*dt,d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;if(rakeSegmentClear({x:actor.x,z:actor.z},{x:nx,z:nz},path.obstacles)){actor.x=nx;actor.z=nz}else actor.particleReplan=true}
+ const yaw=Math.atan2(dx||0,dz||1);actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,6,dt);actor.rakeParticleDebugData=path;
 }
-function drawRakeVectorGizmos(){
- clearRakeVectorGizmos();if(!rakeVectorDebug||!monster?.navActor?.rakeVectorDebugData)return;
- const d=monster.navActor.rakeVectorDebugData,origin=new THREE.Vector3(monster.position.x,monster.position.y+1.1,monster.position.z);
- const positions=[],colors=[];const line=(x,z,length,color)=>{positions.push(origin.x,origin.y,origin.z,origin.x+x*length,origin.y,origin.z+z*length);colors.push(...color,...color)};
- for(const p of d.probes){const clear=p.clearance>2;line(p.x,p.z,Math.min(8,Math.max(.35,p.clearance)),clear?[.12,.95,.35]:[1,.18,.16])}
- line(d.targetX,d.targetZ,Math.min(12,Math.max(1,d.targetClearance)),[1,.78,.12]);
- line(d.chosenX,d.chosenZ,Math.min(10,Math.max(1,d.chosenClearance)),[.15,.75,1]);
- const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));g.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));rakeVectorDebugGroup.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.95,depthTest:false})));
-}
+function drawRakeParticleGizmos(){if(!rakeParticleDebugOn||!monster?.navActor?.rakeParticleDebugData){clearRakeParticleGizmos();return}if(elapsed<rakeParticleDrawAt)return;rakeParticleDrawAt=elapsed+.18;clearRakeParticleGizmos();const d=monster.navActor.rakeParticleDebugData,pp=[];for(const p of d.particles)pp.push(p.x,.22,p.z);const pg=new THREE.BufferGeometry();pg.setAttribute("position",new THREE.Float32BufferAttribute(pp,3));rakeParticleGroup.add(new THREE.Points(pg,new THREE.PointsMaterial({color:0x4cff82,size:.42,depthTest:false})));const lp=[];for(const p of d.points)lp.push(p.x,.28,p.z);const lg=new THREE.BufferGeometry();lg.setAttribute("position",new THREE.Float32BufferAttribute(lp,3));rakeParticleGroup.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color:0x25bfff,depthTest:false})));const ep=[];for(let i=0;i<d.points.length;i+=3){const p=d.points[i];ep.push(p.x,.34,p.z)}const eg=new THREE.BufferGeometry();eg.setAttribute("position",new THREE.Float32BufferAttribute(ep,3));rakeParticleGroup.add(new THREE.Points(eg,new THREE.PointsMaterial({color:0xc2f3ff,size:.2,depthTest:false})))}
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
@@ -302,7 +241,7 @@ function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamage
   }
  }
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
- const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;rakeVectorSteer(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
+ const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;rakeParticleSteer(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=THREE.MathUtils.damp(monster.rotation.y,navActor.yaw??Math.atan2(gx,gz),7,dt);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),goalDistance=goal?Math.hypot(goal.x-monster.position.x,goal.z-monster.position.z):0,moving=goalDistance>.65&&enemySpeed>0;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
@@ -329,7 +268,7 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  navDebugSegments=[];updateSurvivors(dt);moveEnemy(dt);drawNavDebug();drawRakeVectorGizmos();
+  navDebugSegments=[];updateSurvivors(dt);moveEnemy(dt);drawNavDebug();drawRakeParticleGizmos();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';
   document.querySelector('#bar').style.width=player.hp+'%';
