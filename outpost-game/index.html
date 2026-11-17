@@ -95,7 +95,7 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 
 // Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
 // Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
-let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];let rakeVectorDebug=false;let rakeVectorDebugData=null;const rakeVectorDebugGroup=new THREE.Group();scene.add(rakeVectorDebugGroup);const rakeVectorButton=document.querySelector("#rake-vector-toggle");function toggleRakeVectorGizmos(){rakeVectorDebug=!rakeVectorDebug;rakeVectorButton.textContent="RAKE VECTORS: "+(rakeVectorDebug?"ON":"OFF");rakeVectorButton.classList.toggle("active",rakeVectorDebug);if(!rakeVectorDebug){rakeVectorDebugGroup.clear();notice("Rake vector gizmos OFF")}else notice("Rake vector gizmos ON")}rakeVectorButton.addEventListener("click",toggleRakeVectorGizmos);const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];let rakeVectorDebug=false;const rakeVectorDebugGroup=new THREE.Group();scene.add(rakeVectorDebugGroup);function clearRakeVectorGizmos(){for(const child of rakeVectorDebugGroup.children){child.geometry?.dispose();if(Array.isArray(child.material))child.material.forEach(m=>m.dispose());else child.material?.dispose()}rakeVectorDebugGroup.clear()}const rakeVectorButton=document.querySelector("#rake-vector-toggle");function toggleRakeVectorGizmos(){rakeVectorDebug=!rakeVectorDebug;rakeVectorButton.textContent="RAKE VECTORS: "+(rakeVectorDebug?"ON":"OFF");rakeVectorButton.classList.toggle("active",rakeVectorDebug);if(!rakeVectorDebug){clearRakeVectorGizmos();notice("Rake vector gizmos OFF")}else notice("Rake vector gizmos ON")}rakeVectorButton.addEventListener("click",toggleRakeVectorGizmos);const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
@@ -276,7 +276,7 @@ function rakeRaySteer(actor,goal,dt,speed){
  actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,5.2,dt);
 }
 function drawRakeVectorGizmos(){
- rakeVectorDebugGroup.clear();if(!rakeVectorDebug||!monster?.navActor?.rakeVectorDebugData)return;
+ clearRakeVectorGizmos();if(!rakeVectorDebug||!monster?.navActor?.rakeVectorDebugData)return;
  const d=monster.navActor.rakeVectorDebugData,origin=new THREE.Vector3(monster.position.x,monster.position.y+1.1,monster.position.z);
  const positions=[],colors=[];const line=(x,z,length,color)=>{positions.push(origin.x,origin.y,origin.z,origin.x+x*length,origin.y,origin.z+z*length);colors.push(...color,...color)};
  for(const p of d.probes){const clear=p.clearance>2;line(p.x,p.z,Math.min(8,Math.max(.35,p.clearance)),clear?[.12,.95,.35]:[1,.18,.16])}
