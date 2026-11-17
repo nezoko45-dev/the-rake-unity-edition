@@ -197,23 +197,38 @@ function rakeSegmentClear(a,b,obs){const vx=b.x-a.x,vz=b.z-a.z,l2=vx*vx+vz*vz;fo
 function rakeBuildParticleTrail(actor,goal){
  const sx=actor.x,sz=actor.z,dx=goal.x-sx,dz=goal.z-sz,len=Math.hypot(dx,dz);if(len<.15)return null;
  const relevant=obstacles.map(o=>({o,d:Math.hypot(o.x-(sx+dx*.5),o.z-(sz+dz*.5))})).filter(v=>v.d<len*.5+25&&Math.hypot(v.o.x-sx,v.o.z-sz)<58).sort((a,b)=>a.d-b.d).slice(0,30).map(v=>v.o);
+ // Emit real navigation particles down the route corridor, plus rings around obstacles.
  const nodes=[{x:sx,z:sz,type:"start"},{x:goal.x,z:goal.z,type:"goal"}];
- for(const o of relevant){const r=o.r+RAKE_COLLISION_RADIUS+RAKE_PARTICLE_MARGIN;for(let i=0;i<RAKE_PARTICLE_RING_COUNT;i++){const a=i*Math.PI*2/RAKE_PARTICLE_RING_COUNT,p={x:o.x+Math.cos(a)*r,z:o.z+Math.sin(a)*r,type:"particle"};if(relevant.every(q=>Math.hypot(p.x-q.x,p.z-q.z)>=q.r+RAKE_COLLISION_RADIUS+.12))nodes.push(p)}}
+ const spacing=2.0,steps=Math.max(1,Math.ceil(len/spacing));
+ for(let i=1;i<steps;i++){const t=i/steps;nodes.push({x:sx+dx*t,z:sz+dz*t,type:"particle"})}
+ for(const o of relevant){const r=o.r+RAKE_COLLISION_RADIUS+RAKE_PARTICLE_MARGIN;for(let i=0;i<RAKE_PARTICLE_RING_COUNT;i++){const ang=i*Math.PI*2/RAKE_PARTICLE_RING_COUNT,p={x:o.x+Math.cos(ang)*r,z:o.z+Math.sin(ang)*r,type:"particle"};if(relevant.every(q=>Math.hypot(p.x-q.x,p.z-q.z)>=q.r+RAKE_COLLISION_RADIUS+.12))nodes.push(p)}}
  const n=nodes.length,edges=Array.from({length:n},()=>[]);for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)if(rakeSegmentClear(nodes[i],nodes[j],relevant)){const w=Math.hypot(nodes[j].x-nodes[i].x,nodes[j].z-nodes[i].z);edges[i].push([j,w]);edges[j].push([i,w])}
  const dist=Array(n).fill(Infinity),prev=Array(n).fill(-1),used=Array(n).fill(false);dist[0]=0;
  for(let k=0;k<n;k++){let u=-1,best=Infinity;for(let i=0;i<n;i++)if(!used[i]&&dist[i]<best){best=dist[i];u=i}if(u<0||u===1)break;used[u]=true;for(const [v,w] of edges[u])if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u}}
  if(!Number.isFinite(dist[1]))return null;const ids=[];for(let at=1;at!==-1;at=prev[at]){ids.push(at);if(at===0)break}ids.reverse();if(ids[0]!==0)return null;
- const way=ids.map(i=>new THREE.Vector3(nodes[i].x,0,nodes[i].z)),points=[];for(let i=0;i<way.length-1;i++){const p=way[i],q=way[i+1],steps=Math.max(1,Math.ceil(p.distanceTo(q)/.5));for(let j=0;j<steps;j++)points.push(p.clone().lerp(q,j/steps))}points.push(way[way.length-1].clone());
- return{points,particles:nodes.filter(p=>p.type==="particle"),obstacles:relevant,goalX:goal.x,goalZ:goal.z,createdAt:elapsed};
+ const waypoints=ids.map(i=>({x:nodes[i].x,z:nodes[i].z,type:nodes[i].type}));
+ return{waypoints,particles:nodes.filter(p=>p.type==="particle"),obstacles:relevant,goalX:goal.x,goalZ:goal.z,createdAt:elapsed};
 }
 function rakeParticleSteer(actor,goal,dt,speed){
- let path=actor.particleTrail;if(!path||Math.hypot(path.goalX-goal.x,path.goalZ-goal.z)>2.1||elapsed-path.createdAt>.85||actor.particleReplan){const next=rakeBuildParticleTrail(actor,goal);if(!next){actor.particleReplan=true;return}actor.particleTrail=path=next;actor.particlePathIndex=0;actor.particleReplan=false}
- const pts=path.points;let nearest=actor.particlePathIndex||0,best=Infinity;for(let i=Math.max(0,nearest-3);i<pts.length;i++){const d=Math.hypot(pts[i].x-actor.x,pts[i].z-actor.z);if(d<best){best=d;nearest=i}}actor.particlePathIndex=nearest;
- let targetI=nearest,walked=0;while(targetI<pts.length-1&&walked<2.3){walked+=pts[targetI].distanceTo(pts[targetI+1]);targetI++}
- const guide=pts[targetI],dx=guide.x-actor.x,dz=guide.z-actor.z,d=Math.hypot(dx,dz);if(d>.04){const step=Math.min(speed*dt,d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;if(rakeSegmentClear({x:actor.x,z:actor.z},{x:nx,z:nz},path.obstacles)){actor.x=nx;actor.z=nz}else actor.particleReplan=true}
- const yaw=Math.atan2(dx||0,dz||1);actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,6,dt);actor.rakeParticleDebugData=path;
+ let path=actor.particleTrail;
+ // Rebuild only when the goal meaningfully changes or a waypoint becomes blocked.
+ if(!path||Math.hypot(path.goalX-goal.x,path.goalZ-goal.z)>2.1||elapsed-path.createdAt>1.2||actor.particleReplan){
+  const next=rakeBuildParticleTrail(actor,goal);if(!next){actor.particleReplan=true;return}
+  actor.particleTrail=path=next;actor.particlePathIndex=1;actor.particleReplan=false;
+ }
+ const way=path.waypoints;if(!way||way.length<2)return;
+ let index=Math.min(actor.particlePathIndex||1,way.length-1),particle=way[index];
+ // Move toward the next emitted particle's exact position. Do not steer toward
+ // the target between particles; advance only after reaching this waypoint.
+ let dx=particle.x-actor.x,dz=particle.z-actor.z,d=Math.hypot(dx,dz);
+ while(d<.62&&index<way.length-1){index++;particle=way[index];dx=particle.x-actor.x;dz=particle.z-actor.z;d=Math.hypot(dx,dz)}
+ actor.particlePathIndex=index;
+ if(d>.04&&speed>0){const step=Math.min(speed*dt,d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;
+  if(rakeSegmentClear({x:actor.x,z:actor.z},{x:nx,z:nz},path.obstacles)){actor.x=nx;actor.z=nz}else actor.particleReplan=true}
+ const yaw=Math.atan2(dx||0,dz||1);actor.yaw=THREE.MathUtils.damp(actor.yaw??yaw,yaw,6,dt);
+ actor.rakeParticleDebugData=path;
 }
-function drawRakeParticleGizmos(){if(!rakeParticleDebugOn||!monster?.navActor?.rakeParticleDebugData){clearRakeParticleGizmos();return}if(elapsed<rakeParticleDrawAt)return;rakeParticleDrawAt=elapsed+.18;clearRakeParticleGizmos();const d=monster.navActor.rakeParticleDebugData,pp=[];for(const p of d.particles)pp.push(p.x,.22,p.z);const pg=new THREE.BufferGeometry();pg.setAttribute("position",new THREE.Float32BufferAttribute(pp,3));rakeParticleGroup.add(new THREE.Points(pg,new THREE.PointsMaterial({color:0x4cff82,size:.42,depthTest:false})));const lp=[];for(const p of d.points)lp.push(p.x,.28,p.z);const lg=new THREE.BufferGeometry();lg.setAttribute("position",new THREE.Float32BufferAttribute(lp,3));rakeParticleGroup.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color:0x25bfff,depthTest:false})));const ep=[];for(let i=0;i<d.points.length;i+=3){const p=d.points[i];ep.push(p.x,.34,p.z)}const eg=new THREE.BufferGeometry();eg.setAttribute("position",new THREE.Float32BufferAttribute(ep,3));rakeParticleGroup.add(new THREE.Points(eg,new THREE.PointsMaterial({color:0xc2f3ff,size:.2,depthTest:false})))}
+function drawRakeParticleGizmos(){if(!rakeParticleDebugOn||!monster?.navActor?.rakeParticleDebugData){clearRakeParticleGizmos();return}if(elapsed<rakeParticleDrawAt)return;rakeParticleDrawAt=elapsed+.18;clearRakeParticleGizmos();const d=monster.navActor.rakeParticleDebugData,pp=[];for(const p of d.particles)pp.push(p.x,.22,p.z);const pg=new THREE.BufferGeometry();pg.setAttribute("position",new THREE.Float32BufferAttribute(pp,3));rakeParticleGroup.add(new THREE.Points(pg,new THREE.PointsMaterial({color:0x4cff82,size:.42,depthTest:false})));const lp=[];for(const p of d.waypoints)lp.push(p.x,.28,p.z);const lg=new THREE.BufferGeometry();lg.setAttribute("position",new THREE.Float32BufferAttribute(lp,3));rakeParticleGroup.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color:0x25bfff,depthTest:false})));const ep=[];for(let i=0;i<d.waypoints.length;i++){const p=d.waypoints[i];ep.push(p.x,.34,p.z)}const eg=new THREE.BufferGeometry();eg.setAttribute("position",new THREE.Float32BufferAttribute(ep,3));rakeParticleGroup.add(new THREE.Points(eg,new THREE.PointsMaterial({color:0xc2f3ff,size:.2,depthTest:false})))}
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
