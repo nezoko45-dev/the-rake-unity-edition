@@ -71,7 +71,7 @@ function drawNavDebug(){
  if(elapsed>=navDebugRefresh){
   navDebugSegments=[];
   navDebugRefresh=elapsed+.35;
-  const p=controls.getObject().position,base=navCell(p.x,p.z),range=5;
+  const p=monster?.navActor||controls.getObject().position,base=navCell(p.x,p.z),range=RAKE_LOCAL_RADIUS;
   const offsets=[[1,0],[0,1],[1,1],[1,-1]];
   for(let ix=base.x-range;ix<=base.x+range;ix++)for(let iz=base.z-range;iz<=base.z+range;iz++){
    const a=navCenter(ix,iz);if(blocked(a.x,a.z))continue;
@@ -96,6 +96,55 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 // Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
 // Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
 let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+// Rake-only local grid: neighboring cell centers connect only when their
+// obstacle-clearance bridge is open. The Rake pursues along this local graph.
+const RAKE_LOCAL_RADIUS=6,RAKE_LOCAL_REFRESH=.32;
+function buildRakeLocalGrid(actor,goal){
+ const base=navCell(actor.x,actor.z),nodes=new Map(),key=(x,z)=>x+','+z;
+ for(let iz=base.z-RAKE_LOCAL_RADIUS;iz<=base.z+RAKE_LOCAL_RADIUS;iz++)for(let ix=base.x-RAKE_LOCAL_RADIUS;ix<=base.x+RAKE_LOCAL_RADIUS;ix++){
+  const p=navCenter(ix,iz);if(!blocked(p.x,p.z))nodes.set(key(ix,iz),{ix,iz,x:p.x,z:p.z,edges:[]});
+ }
+ const neighborOffsets=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+ for(const node of nodes.values())for(const [ox,oz] of neighborOffsets){
+  const other=nodes.get(key(node.ix+ox,node.iz+oz));
+  if(other&&bridgeClear(node.x,node.z,other.x,other.z))node.edges.push(other);
+ }
+ let start=null,startDistance=Infinity;
+ for(const node of nodes.values()){
+  const d=Math.hypot(node.x-actor.x,node.z-actor.z);
+  if(d<startDistance&&d<NAV_CELL*1.8&&bridgeClear(actor.x,actor.z,node.x,node.z)){start=node;startDistance=d}
+ }
+ if(!start)return{nodes,edges:[],path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ const queue=[start],parent=new Map([[key(start.ix,start.iz),null]]),edges=[];
+ for(let i=0;i<queue.length;i++){
+  const node=queue[i];
+  for(const other of node.edges){
+   edges.push([node,other]);const k=key(other.ix,other.iz);
+   if(parent.has(k))continue;parent.set(k,node);queue.push(other);
+  }
+ }
+ let best=start,bestScore=Math.hypot(goal.x-start.x,goal.z-start.z);
+ for(const node of queue){const score=Math.hypot(goal.x-node.x,goal.z-node.z);if(score<bestScore){best=node;bestScore=score}}
+ const path=[];let cursor=best;
+ while(cursor&&cursor!==start){path.push({x:cursor.x,z:cursor.z});cursor=parent.get(key(cursor.ix,cursor.iz))}
+ path.reverse();
+ return{nodes,edges,path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+}
+function rakeLocalGridMove(actor,goal,dt,speed){
+ if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
+ let grid=actor.rakeLocalGrid;
+ if(!grid||elapsed-grid.builtAt>=RAKE_LOCAL_REFRESH||
+    Math.hypot(goal.x-grid.target.x,goal.z-grid.target.z)>1.25||
+    !grid.next||Math.hypot(actor.x-grid.next.x,actor.z-grid.next.z)<.42){
+  grid=buildRakeLocalGrid(actor,goal);actor.rakeLocalGrid=grid;
+ }
+ const waypoint=grid.next;if(!waypoint)return;
+ const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,d=Math.hypot(dx,dz);
+ if(d<.02)return;
+ const step=Math.min(Math.max(0,speed*dt),d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;
+ if(!bridgeClear(actor.x,actor.z,nx,nz)){actor.rakeLocalGrid=null;return}
+ actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz);
+}
 function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
@@ -256,7 +305,7 @@ function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamage
   }
  }
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
- const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;rakeParticleSteer(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
+ const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;rakeLocalGridMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=THREE.MathUtils.damp(monster.rotation.y,navActor.yaw??Math.atan2(gx,gz),7,dt);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),goalDistance=goal?Math.hypot(goal.x-monster.position.x,goal.z-monster.position.z):0,moving=goalDistance>.65&&enemySpeed>0;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
