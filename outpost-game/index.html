@@ -331,31 +331,55 @@ function drawRakeAvoidanceGizmos(){
 function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
  const gx=goal.x-actor.x,gz=goal.z-actor.z,goalDistance=Math.hypot(gx,gz);
- if(goalDistance<.12)return;
- // Direct raycast steering: score the sampled radial object-bound directions
- // by progress toward the goal and available clearance. No triangles, cells,
- // route graph, BFS, DFS, or waypoint generation are involved.
+ if(goalDistance<.12){actor.rakeBoundaryFollow=null;return}
  const samples=sampleRakeObjectBounds(actor),count=RAKE_AVOIDANCE_RAY_COUNT;
- const desired=Math.atan2(gx,gz);
- let best=null,bestScore=-Infinity;
+ const desired=Math.atan2(gx,gz),wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
+ const clearanceAt=i=>Math.min(samples.samples[i*2].hitDistance,samples.samples[i*2+1].hitDistance);
+ // Find the radial sample most closely aligned with the target.
+ let directIndex=0,directDiff=Infinity;
+ for(let i=0;i<count;i++){const diff=Math.abs(wrap(i/count*Math.PI*2-desired));if(diff<directDiff){directDiff=diff;directIndex=i}}
+ const directClearance=clearanceAt(directIndex);
+ let follow=actor.rakeBoundaryFollow;
+ // Start tracing when the target-facing ray hits an object. Pick the side
+ // whose tangent initially makes the most progress toward the target.
+ if(!follow&&directClearance<Math.min(goalDistance,RAKE_AVOIDANCE_RANGE)-.3){
+  const wallAngle=directIndex/count*Math.PI*2;
+  const left=wrap(wallAngle+Math.PI*.5),right=wrap(wallAngle-Math.PI*.5);
+  const leftScore=Math.cos(left-desired),rightScore=Math.cos(right-desired);
+  follow={side:leftScore>=rightScore?1:-1,wallAngle};
+ }
+ if(follow){
+  // Keep the same side while tracing the obstacle. Only leave boundary mode
+  // once the target-facing corridor is visibly clear again.
+  if(directClearance>Math.min(2.1,goalDistance)-.15){
+   actor.rakeBoundaryFollow=null;follow=null;
+  }else{
+   follow.wallAngle=wrap(desired+wrap(follow.wallAngle-desired)*.72);
+  }
+ }
+ let steeringAngle=desired,best=null,bestScore=-Infinity;
+ if(follow){
+  // Move tangent to the detected object boundary, with a small outward bias.
+  // Candidate directions are still chosen exclusively from the radial rays.
+  const tangent=wrap(follow.wallAngle+follow.side*Math.PI*.5);
+  const outward=wrap(follow.wallAngle+Math.PI);
+  steeringAngle=wrap(tangent+wrap(outward-tangent)*.16);
+ }else steeringAngle=desired;
  for(let i=0;i<count;i++){
-  const angle=i/count*Math.PI*2,group=samples.samples.slice(i*2,i*2+2);
-  const clearance=Math.min(...group.map(q=>q.hitDistance));
-  const alignment=Math.cos(angle-desired);
-  const turn=actor.rakeSteerAngle==null?0:Math.abs(Math.atan2(Math.sin(angle-actor.rakeSteerAngle),Math.cos(angle-actor.rakeSteerAngle)));
-  // Reject directions that cannot safely fit even a short movement step.
-  if(clearance<.42)continue;
-  const score=alignment*4+Math.min(clearance,RAKE_AVOIDANCE_RANGE)*.2-turn*.24;
+  const angle=i/count*Math.PI*2,clearance=clearanceAt(i);
+  if(clearance<.38)continue;
+  const alignment=Math.cos(angle-steeringAngle);
+  const targetProgress=Math.cos(angle-desired);
+  const turn=actor.rakeSteerAngle==null?0:Math.abs(wrap(angle-actor.rakeSteerAngle));
+  const score=alignment*(follow?5.2:4.4)+targetProgress*(follow?.65:1.1)+Math.min(clearance,RAKE_AVOIDANCE_RANGE)*.16-turn*.12;
   if(score>bestScore){bestScore=score;best={angle,clearance}}
  }
  if(!best)return;
  actor.rakeSteerAngle=best.angle;
  const directionX=Math.sin(best.angle),directionZ=Math.cos(best.angle);
- let step=Math.min(speed*dt,goalDistance,best.clearance-.28);
+ let step=Math.min(speed*dt,goalDistance,best.clearance-.3);
  if(step<.015)return;
- // Recheck the exact movement segment at the Rake's body heights before
- // committing. If a narrow obstacle clips the step, shorten it progressively.
- for(let attempt=0;attempt<4;attempt++){
+ for(let attempt=0;attempt<5;attempt++){
   const nx=actor.x+directionX*step,nz=actor.z+directionZ*step;
   if(!blocked(nx,nz)&&rakeObjectBoundsClear(actor.x,actor.z,nx,nz)&&navSurfaceHit(nx,nz)){
    actor.x=nx;actor.z=nz;actor.yaw=best.angle;return;
