@@ -307,7 +307,6 @@ function rakeAvoidancePenalty(actor,candidate){
  if(nearestHit>distance+.7)return 0;
  return 3.2*(1-nearestHit/(distance+.7));
 }
-let globalGroundScoreSignature='',globalGroundScoreDrawnAt=0;
 const GLOBAL_GROUND_SCORE_CELL=1.5;
 let globalGroundScoreSignature='',globalGroundScoreMap=new Map(),globalGroundScoreDrawnAt=0;
 function globalGroundScoreKey(ix,iz){return ix+','+iz}
