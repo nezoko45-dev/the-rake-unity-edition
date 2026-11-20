@@ -90,17 +90,18 @@ function buildGlobalPolygonDebug(){
    }
   }
  }
- // Connect triangles that share an actual full edge. Validate the shared
- // boundary itself, but do not reject the connection because a straight
- // centroid-to-centroid ray clips a nearby carved obstacle: the shared edge
- // is the topological connection and movement is validated separately.
- for(const pair of edges.values())if(pair.length===2){
-  const [a,b]=pair,m={x:(a.a.x+a.b.x)*.5,z:(a.a.z+a.b.z)*.5};
-  const q1={x:a.a.x*.75+a.b.x*.25,z:a.a.z*.75+a.b.z*.25};
-  const q3={x:a.a.x*.25+a.b.x*.75,z:a.a.z*.25+a.b.z*.75};
-  if(!navSurfaceHit(m.x,m.z)||!navSurfaceHit(q1.x,q1.z)||!navSurfaceHit(q3.x,q3.z))continue;
-  if(blocked(m.x,m.z)||blocked(q1.x,q1.z)||blocked(q3.x,q3.z))continue;
-  a.poly.portals.push({to:b.poly,point:m});b.poly.portals.push({to:a.poly,point:m});
+ // Raycast between nearby triangle centroids. A connection exists only
+ // when the full corridor is clear and every sample has walkable ground.
+ for(const a of polygons.values()){
+  for(let ox=-2;ox<=2;ox++)for(let oz=-2;oz<=2;oz++){
+   if(ox===0&&oz===0)continue;
+   const candidates=[polygons.get(key(a.ix+ox,a.iz+oz,0)),polygons.get(key(a.ix+ox,a.iz+oz,1))];
+   for(const b of candidates){
+    if(!b||b===a||b.portals.some(link=>link.to===a))continue;
+    if(!bridgeClear(a.x,a.z,b.x,b.z))continue;
+    a.portals.push({to:b,point:{x:(a.x+b.x)*.5,z:(a.z+b.z)*.5}});
+   }
+  }
  }
  globalPolygonDebugCache=polygons;return polygons;
 }
@@ -179,39 +180,27 @@ function polygonPortal(a,b){
  return{x,z};
 }
 function buildRakePolygonNavmesh(actor,goal){
- const polygons=buildGlobalPolygonDebug();let start=null,startD=Infinity;
- // The actor must be on, or have a clear walkable bridge into, a valid triangle.
+ const polygons=buildGlobalPolygonDebug();
+ // No BFS or graph traversal: choose a nearby triangle only when a direct
+ // raycast proves the actor-to-triangle corridor is clear and walkable.
+ if(bridgeClear(actor.x,actor.z,goal.x,goal.z)){
+  return{path:[{x:goal.x,z:goal.z,goal:true}],next:{x:goal.x,z:goal.z,goal:true},builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ }
+ const currentDistance=Math.hypot(goal.x-actor.x,goal.z-actor.z);
+ let best=null,bestScore=Infinity,bestKey='';
  for(const poly of polygons.values()){
-  const d=Math.hypot(poly.x-actor.x,poly.z-actor.z);
-  if(d<startD&&d<NAV_CELL*1.8&&bridgeClear(actor.x,actor.z,poly.x,poly.z)){start=poly;startD=d}
- }
- if(!start)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
- const id=p=>p.ix+','+p.iz+','+p.tri,queue=[start],parent=new Map([[id(start),null]]);
- // Traverse only verified shared-edge links: every visited node is a connected,
- // walkable triangle in the same global mesh.
- for(let i=0;i<queue.length;i++)for(const edge of queue[i].portals){
-  const next=edge.to,k=id(next);if(parent.has(k))continue;
-  parent.set(k,queue[i]);queue.push(next);
- }
- // Prefer a triangle that directly reaches the goal; otherwise use the
- // closest reachable triangle as the final approach point.
- let best=null,bestScore=Infinity;
- for(const poly of queue){
-  const d=Math.hypot(goal.x-poly.x,goal.z-poly.z);
-  const reaches=bridgeClear(poly.x,poly.z,goal.x,goal.z);
-  const score=d+(reaches?0:100000);
-  if(score<bestScore){best=poly;bestScore=score}
+  const dx=poly.x-actor.x,dz=poly.z-actor.z,hop=Math.hypot(dx,dz);
+  if(hop<.45||hop>NAV_CELL*3.5)continue;
+  if(dx*(goal.x-actor.x)+dz*(goal.z-actor.z)<=0)continue;
+  if(!bridgeClear(actor.x,actor.z,poly.x,poly.z))continue;
+  const remaining=Math.hypot(goal.x-poly.x,goal.z-poly.z);
+  const score=remaining+hop*.12;
+  const triangleKey=poly.ix+','+poly.iz+','+poly.tri;
+  if(score<bestScore){best=poly;bestScore=score;bestKey=triangleKey}
  }
  if(!best)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
- const path=[];let cursor=best;
- while(cursor!==start){path.push({x:cursor.x,z:cursor.z,triangle:id(cursor)});cursor=parent.get(id(cursor));if(!cursor)break}
- path.reverse();
- if(path.length&&Math.hypot(actor.x-path[0].x,actor.z-path[0].z)<.28)path.shift();
- // When already in the destination triangle, walk directly to the goal only
- // if that final segment is independently confirmed walkable.
- if(!path.length&&bridgeClear(actor.x,actor.z,goal.x,goal.z))path.push({x:goal.x,z:goal.z,goal:true});
- else if(path.length&&best&&bridgeClear(best.x,best.z,goal.x,goal.z))path.push({x:goal.x,z:goal.z,goal:true});
- return{path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ const waypoint={x:best.x,z:best.z,triangle:bestKey};
+ return{path:[waypoint],next:waypoint,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
 }
 function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
