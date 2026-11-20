@@ -366,58 +366,51 @@ function drawRakeAvoidanceGizmos(){
 }
 function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
- const goalDistance=Math.hypot(goal.x-actor.x,goal.z-actor.z);
- if(goalDistance<.12){actor.rakeGroundWaypoint=null;actor.rakeGroundVisited=[];return}
- const scores=buildGlobalGroundScores(),cell=GLOBAL_GROUND_SCORE_CELL;
- const wrapCell=(x,z)=>({ix:Math.floor(x/cell),iz:Math.floor(z/cell)});
- const segmentClear=(ax,az,bx,bz)=>{
-  const dx=bx-ax,dz=bz-az,lenSq=dx*dx+dz*dz;
-  for(const o of obstacles){
-   const t=lenSq>1e-8?THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/lenSq,0,1):0;
-   const px=ax+dx*t,pz=az+dz*t;
-   if(Math.hypot(px-o.x,pz-o.z)<o.r+.88)return false;
-  }
-  return true;
+ const gx=goal.x-actor.x,gz=goal.z-actor.z,goalDistance=Math.hypot(gx,gz);
+ if(goalDistance<.12)return;
+ const desired=Math.atan2(gx,gz),wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
+ const count=24,step=Math.min(speed*dt,goalDistance),lookAhead=Math.max(2.2,Math.min(5.5,speed*.72));
+ const scored=[],groundPoint=(x,z)=>{
+  navSurfaceRaycaster.set(new THREE.Vector3(x,40,z),new THREE.Vector3(0,-1,0));
+  navSurfaceRaycaster.far=80;
+  return navSurfaceRaycaster.intersectObject(ground,false).length>0;
  };
- const here=wrapCell(actor.x,actor.z),hereKey=globalGroundScoreKey(here.ix,here.iz);
- let visited=actor.rakeGroundVisited;
- if(!Array.isArray(visited)||actor.rakeGroundGoalKey!==globalGroundScoreKey(Math.floor(goal.x/6),Math.floor(goal.z/6))){
-  visited=[];actor.rakeGroundVisited=visited;actor.rakeGroundGoalKey=globalGroundScoreKey(Math.floor(goal.x/6),Math.floor(goal.z/6));actor.rakeGroundWaypoint=null;
- }
- if(visited[visited.length-1]!==hereKey){visited.push(hereKey);if(visited.length>32)visited.shift()}
- // Keep the selected global ground tile until reached; do not re-pick a
- // direction every frame, which would cause jitter at tile boundaries.
- let waypoint=actor.rakeGroundWaypoint;
- if(waypoint){
-  const d=Math.hypot(waypoint.x-actor.x,waypoint.z-actor.z);
-  if(d<.22||!globalGroundScoreAt(waypoint.ix,waypoint.iz)?.walkable||!segmentClear(actor.x,actor.z,waypoint.x,waypoint.z))waypoint=null;
- }
- if(!waypoint){
-  let best=null,bestScore=Infinity;
-  // The Rake advances only to a neighboring globally scored ground tile.
-  // No raycasts, navmesh graph, BFS, or direct long-range target steering.
-  for(let oz=-1;oz<=1;oz++)for(let ox=-1;ox<=1;ox++){
-   if(!ox&&!oz)continue;
-   const tile=globalGroundScoreAt(here.ix+ox,here.iz+oz);
-   if(!tile||!tile.walkable||!segmentClear(actor.x,actor.z,tile.x,tile.z))continue;
-   const remaining=Math.hypot(goal.x-tile.x,goal.z-tile.z);
-   const clearanceBonus=Math.min(tile.score,3)*.62;
-   const revisit=visited.includes(globalGroundScoreKey(tile.ix,tile.iz))?1.9:0;
-   const diagonal=(ox!==0&&oz!==0)?0.08:0;
-   const score=remaining-clearanceBonus+revisit+diagonal;
-   if(score<bestScore){bestScore=score;best=tile}
+ let best=null,bestScore=-Infinity;
+ for(let i=0;i<count;i++){
+  const angle=i/count*Math.PI*2,dx=Math.sin(angle),dz=Math.cos(angle);
+  const endX=actor.x+dx*lookAhead,endZ=actor.z+dz*lookAhead;
+  let walkable=true,clearance=Infinity;
+  // Evaluate a continuous corridor over the actual ground surface. Object
+  // bounds terminate blocked corridors; no discrete navigation tiles or
+  // stored tile waypoints are involved.
+  const samples=Math.max(3,Math.ceil(lookAhead/.65));
+  for(let j=1;j<=samples;j++){
+   const t=j/samples,x=actor.x+dx*lookAhead*t,z=actor.z+dz*lookAhead*t;
+   if(!groundPoint(x,z)){walkable=false;break}
+   for(const o of obstacles){
+    const surface=Math.hypot(x-o.x,z-o.z)-(o.r+.88);
+    clearance=Math.min(clearance,surface);
+    if(surface<0){walkable=false;break}
+   }
+   if(!walkable)break;
   }
-  if(best){waypoint={ix:best.ix,iz:best.iz,x:best.x,z:best.z,score:bestScore};actor.rakeGroundWaypoint=waypoint}
+  if(!walkable){scored.push({angle,score:-Infinity,walkable:false});continue}
+  const progress=goalDistance-Math.hypot(goal.x-endX,goal.z-endZ);
+  const alignment=Math.cos(angle-desired);
+  const turn=actor.rakeSteerAngle==null?0:Math.abs(wrap(angle-actor.rakeSteerAngle));
+  const safeClearance=Math.min(Number.isFinite(clearance)?clearance:5,5);
+  const score=progress*1.8+alignment*1.1+safeClearance*.34-turn*.16;
+  scored.push({angle,score,walkable:true,clearance:safeClearance,travel:step});
+  if(score>bestScore){bestScore=score;best={angle}}
  }
- if(!waypoint){
-  actor.rakeDirectionScores=[];return;
- }
- const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,distance=Math.hypot(dx,dz);
- if(distance<.04)return;
- const step=Math.min(speed*dt,distance),nx=actor.x+dx/distance*step,nz=actor.z+dz/distance*step;
- if(!segmentClear(actor.x,actor.z,nx,nz)){actor.rakeGroundWaypoint=null;return}
- actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz);actor.rakeSteerAngle=actor.yaw;
- actor.rakeDirectionScores=[{angle:actor.yaw,score:waypoint.score??0,walkable:true,clearance:globalGroundScoreAt(waypoint.ix,waypoint.iz)?.score??0,travel:step}];
+ actor.rakeDirectionScores=scored;
+ if(!best)return;
+ // Move continuously over the selected ground corridor, not from tile
+ // center to tile center. Recheck the immediate movement segment each frame.
+ const nx=actor.x+Math.sin(best.angle)*step,nz=actor.z+Math.cos(best.angle)*step;
+ if(!groundPoint(nx,nz)||blocked(nx,nz)||!bridgeClear(actor.x,actor.z,nx,nz))return;
+ actor.rakeSteerAngle=best.angle;
+ actor.x=nx;actor.z=nz;actor.yaw=best.angle;
 }
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
