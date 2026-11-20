@@ -403,11 +403,11 @@ function polygonGlobalMove(actor,goal,dt,speed){
    const remaining=Math.hypot(goal.x-tile.x,goal.z-tile.z);
    const clearanceBonus=Math.min(tile.score,3)*.62;
    const revisit=visited.includes(globalGroundScoreKey(tile.ix,tile.iz))?1.9:0;
-   const diagonal=ox&&oz?.08:0;
+   const diagonal=(ox!==0&&oz!==0)?0.08:0;
    const score=remaining-clearanceBonus+revisit+diagonal;
    if(score<bestScore){bestScore=score;best=tile}
   }
-  if(best){waypoint={ix:best.ix,iz:best.iz,x:best.x,z:best.z};actor.rakeGroundWaypoint=waypoint}
+  if(best){waypoint={ix:best.ix,iz:best.iz,x:best.x,z:best.z,score:bestScore};actor.rakeGroundWaypoint=waypoint}
  }
  if(!waypoint){
   actor.rakeDirectionScores=[];return;
@@ -417,7 +417,7 @@ function polygonGlobalMove(actor,goal,dt,speed){
  const step=Math.min(speed*dt,distance),nx=actor.x+dx/distance*step,nz=actor.z+dz/distance*step;
  if(!segmentClear(actor.x,actor.z,nx,nz)){actor.rakeGroundWaypoint=null;return}
  actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz);actor.rakeSteerAngle=actor.yaw;
- actor.rakeDirectionScores=[{angle:actor.yaw,score:bestScore,walkable:true,clearance:globalGroundScoreAt(waypoint.ix,waypoint.iz)?.score??0,travel:step}];
+ actor.rakeDirectionScores=[{angle:actor.yaw,score:waypoint.score??0,walkable:true,clearance:globalGroundScoreAt(waypoint.ix,waypoint.iz)?.score??0,travel:step}];
 }
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
