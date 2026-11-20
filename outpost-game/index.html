@@ -332,71 +332,45 @@ function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
  const gx=goal.x-actor.x,gz=goal.z-actor.z,goalDistance=Math.hypot(gx,gz);
  if(goalDistance<.12){actor.rakeBoundaryFollow=null;return}
- const samples=sampleRakeObjectBounds(actor),count=RAKE_AVOIDANCE_RAY_COUNT;
+ const count=RAKE_AVOIDANCE_RAY_COUNT;
  const desired=Math.atan2(gx,gz),wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
- const clearanceAt=i=>Math.min(samples.samples[i*2].hitDistance,samples.samples[i*2+1].hitDistance);
- // Find the radial sample most closely aligned with the target.
- let directIndex=0,directDiff=Infinity;
- for(let i=0;i<count;i++){const diff=Math.abs(wrap(i/count*Math.PI*2-desired));if(diff<directDiff){directDiff=diff;directIndex=i}}
- const directClearance=clearanceAt(directIndex);
  let follow=actor.rakeBoundaryFollow;
- // Start tracing when the target-facing ray hits an object. Pick the side
- // whose tangent initially makes the most progress toward the target.
- if(!follow&&directClearance<Math.min(goalDistance,RAKE_AVOIDANCE_RANGE)-.3){
-  const wallAngle=directIndex/count*Math.PI*2;
-  const left=wrap(wallAngle+Math.PI*.5),right=wrap(wallAngle-Math.PI*.5);
-  const leftScore=Math.cos(left-desired),rightScore=Math.cos(right-desired);
-  follow={side:leftScore>=rightScore?1:-1,wallAngle};
- }
+ // Score directions using obstacle bounds only: no raycasts or mesh queries.
+ const requestedStep=Math.min(speed*dt,goalDistance),scoredDirections=[];
+ let best=null,bestScore=-Infinity;
  if(follow){
-  // Keep the same side while tracing the obstacle. Only leave boundary mode
-  // once the target-facing corridor is visibly clear again.
-  if(directClearance>Math.min(2.1,goalDistance)-.15){
-   actor.rakeBoundaryFollow=null;follow=null;
-  }else{
-   follow.wallAngle=wrap(desired+wrap(follow.wallAngle-desired)*.72);
-  }
- }
- let steeringAngle=desired,best=null,bestScore=-Infinity;
- if(follow){
-  // Move tangent to the detected object boundary, with a small outward bias.
   const tangent=wrap(follow.wallAngle+follow.side*Math.PI*.5);
   const outward=wrap(follow.wallAngle+Math.PI);
-  steeringAngle=wrap(tangent+wrap(outward-tangent)*.16);
- }else steeringAngle=desired;
- const requestedStep=Math.min(speed*dt,goalDistance);
- const scoredDirections=[];
+  var steeringAngle=wrap(tangent+wrap(outward-tangent)*.16);
+ }else var steeringAngle=desired;
  for(let i=0;i<count;i++){
-  const angle=i/count*Math.PI*2,clearance=clearanceAt(i);
-  const dx=Math.sin(angle),dz=Math.cos(angle);
-  const travel=Math.min(requestedStep,Math.max(0,clearance-.3));
-  const nx=actor.x+dx*travel,nz=actor.z+dz*travel;
-  // A direction is terminated when its scored movement segment enters an
-  // obstacle bound. Only surviving, walkable directions receive a score.
-  const terminated=clearance<.38||travel<.025||
-   !rakeObjectBoundsClear(actor.x,actor.z,nx,nz)||blocked(nx,nz)||!navSurfaceHit(nx,nz);
-  if(terminated){scoredDirections.push({angle,score:-Infinity,walkable:false});continue}
+  const angle=i/count*Math.PI*2,dx=Math.sin(angle),dz=Math.cos(angle);
+  const nx=actor.x+dx*requestedStep,nz=actor.z+dz*requestedStep;
+  let walkable=true,clearance=Infinity;
+  // Treat each obstacle's object bound as an expanded circle. A direction
+  // is terminated if its complete movement segment overlaps any bound.
+  for(const o of obstacles){
+   const ox=o.x-actor.x,oz=o.z-actor.z;
+   const t=THREE.MathUtils.clamp((ox*dx+oz*dz)/Math.max(.0001,requestedStep),0,requestedStep);
+   const nearestX=actor.x+dx*t,nearestZ=actor.z+dz*t;
+   const surfaceDistance=Math.hypot(nearestX-o.x,nearestZ-o.z)-(o.r+.8);
+   clearance=Math.min(clearance,surfaceDistance);
+   if(surfaceDistance<.08){walkable=false;break}
+  }
+  if(!walkable){scoredDirections.push({angle,score:-Infinity,walkable:false});continue}
   const alignment=Math.cos(angle-steeringAngle);
   const targetProgress=Math.cos(angle-desired);
   const turn=actor.rakeSteerAngle==null?0:Math.abs(wrap(angle-actor.rakeSteerAngle));
-  const score=alignment*(follow?5.2:4.4)+targetProgress*(follow?.65:1.1)+Math.min(clearance,RAKE_AVOIDANCE_RANGE)*.16-turn*.12;
-  scoredDirections.push({angle,score,walkable:true,clearance,travel});
-  if(score>bestScore){bestScore=score;best={angle,clearance,travel}}
+  const obstacleClearance=Number.isFinite(clearance)?Math.min(clearance,RAKE_AVOIDANCE_RANGE):RAKE_AVOIDANCE_RANGE;
+  const score=alignment*(follow?5.2:4.4)+targetProgress*(follow?.65:1.1)+obstacleClearance*.16-turn*.12;
+  scoredDirections.push({angle,score,walkable:true,clearance:obstacleClearance,travel:requestedStep});
+  if(score>bestScore){bestScore=score;best={angle,travel:requestedStep}}
  }
  actor.rakeDirectionScores=scoredDirections;
  if(!best)return;
  actor.rakeSteerAngle=best.angle;
- const directionX=Math.sin(best.angle),directionZ=Math.cos(best.angle);
- let step=best.travel;
- if(step<.015)return;
- for(let attempt=0;attempt<5;attempt++){
-  const nx=actor.x+directionX*step,nz=actor.z+directionZ*step;
-  if(!blocked(nx,nz)&&rakeObjectBoundsClear(actor.x,actor.z,nx,nz)&&navSurfaceHit(nx,nz)){
-   actor.x=nx;actor.z=nz;actor.yaw=best.angle;return;
-  }
-  step*=.5;
-  if(step<.025)break;
- }
+ const nx=actor.x+Math.sin(best.angle)*best.travel,nz=actor.z+Math.cos(best.angle)*best.travel;
+ actor.x=nx;actor.z=nz;actor.yaw=best.angle;
 }
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
