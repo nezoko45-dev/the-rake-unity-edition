@@ -102,6 +102,17 @@ function navSurfaceHit(x,z){
  navSurfaceRaycaster.far=80;
  return navSurfaceRaycaster.intersectObject(ground,false).length>0;
 }
+function bridgeClear(ax,az,bx,bz){
+ const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz);
+ const samples=Math.max(1,Math.ceil(length/Math.max(.35,NAV_CELL*.2)));
+ // A bridge is valid only when its whole corridor stays outside carved
+ // object bounds and every sample still has a raycast-confirmed floor.
+ for(let i=0;i<=samples;i++){
+  const t=i/samples,x=ax+dx*t,z=az+dz*t;
+  if(blocked(x,z)||!navSurfaceHit(x,z))return false;
+ }
+ return true;
+}
 function polygonOutsideObjectBounds(ix,iz){
  const minX=ix*NAV_CELL,minZ=iz*NAV_CELL,maxX=minX+NAV_CELL,maxZ=minZ+NAV_CELL;
  for(const o of obstacles){
