@@ -60,32 +60,42 @@ const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState
 function playRakeHurtSound(){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),now=ctx.currentTime;const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(260,now);osc.frequency.exponentialRampToValueAtTime(72,now+.42);filter.type='lowpass';filter.frequency.value=950;gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.22,now+.035);gain.gain.exponentialRampToValueAtTime(.0001,now+.62);osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.65);setTimeout(()=>ctx.close(),900)}catch(e){}}
 function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math.max(0,rakeHP-45);rakeDamageCd=3;rakeHurtUntil=elapsed+1.15;rakeSlowUntil=elapsed+1.8;attackAnimUntil=0;anim(/hurt1|hurt/i);if(action)action.timeScale=1;playRakeHurtSound();notice(source+' hit THE RAKE (-45) · '+rakeHP+' HP');return true}
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
-addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'){navDebug=!navDebug;notice('Navigation ray gizmos '+(navDebug?'ON':'OFF'))}if(e.code==='KeyV'){navDebug=!navDebug;notice('Rake polygon navmesh gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'||e.code==='KeyV'){navDebug=!navDebug;rakeParticleButton.textContent="GLOBAL POLYGON NAVMESH: "+(navDebug?"ON":"OFF");rakeParticleButton.classList.toggle("active",navDebug);notice('Global polygon navmesh gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('mousedown',e=>{if(e.button===0)playerRakeHit()});
-let navDebugRefresh=0;
-function drawNavDebug(){
- navDebugGroup.clear();if(!navDebug){navDebugSegments=[];return}
- const positions=[],colors=[];
- const addLine=(ax,az,bx,bz,color)=>{positions.push(ax,.12,az,bx,.12,bz);colors.push(...color,...color)};
- // Draw each nearby cell's ray bridges to its 8 neighbors (each pair once).
- if(elapsed>=navDebugRefresh){
-  navDebugSegments=[];
-  navDebugRefresh=elapsed+.35;
-  const actor=monster?.navActor||controls.getObject().position,goal={x:actor.x+0.01,z:actor.z+0.01};
-  const mesh=buildRakePolygonNavmesh(actor,goal);
-  for(const poly of mesh.polygons.values()){
-   for(let i=0;i<4;i++){const a=poly.vertices[i],b=poly.vertices[(i+1)%4];navDebugSegments.push(a.x,.12,a.z,b.x,.12,b.z,0)}
-   for(const edge of poly.portals){navDebugSegments.push(poly.x,.14,poly.z,edge.point.x,.14,edge.point.z,0)}
+let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
+function buildGlobalPolygonDebug(){
+ const signature=[...chunkMap.keys()].sort().join('|');
+ if(globalPolygonDebugCache&&signature===globalPolygonDebugSignature)return globalPolygonDebugCache;
+ globalPolygonDebugSignature=signature;
+ const polygons=new Map(),key=(x,z)=>x+','+z;
+ // Build polygons across every currently generated forest chunk, not just
+ // the Rake's local neighborhood. Object bounds carve tiles before raycasts.
+ for(const chunk of chunkMap.values()){
+  const minIx=Math.floor(chunk.cx*CHUNK/NAV_CELL),maxIx=Math.ceil((chunk.cx+1)*CHUNK/NAV_CELL)-1;
+  const minIz=Math.floor(chunk.cz*CHUNK/NAV_CELL),maxIz=Math.ceil((chunk.cz+1)*CHUNK/NAV_CELL)-1;
+  for(let iz=minIz;iz<=maxIz;iz++)for(let ix=minIx;ix<=maxIx;ix++){
+   const poly=makeRakePolygon(ix,iz);if(poly)polygons.set(key(ix,iz),poly);
   }
  }
- for(let i=0;i<navDebugSegments.length;i+=7){
-  positions.push(navDebugSegments[i],navDebugSegments[i+1],navDebugSegments[i+2],navDebugSegments[i+3],navDebugSegments[i+4],navDebugSegments[i+5]);
-  const col=navDebugSegments[i+6]===0?[.1,1,.25]:[1,.15,.15];colors.push(...col,...col)
+ for(const poly of polygons.values())for(const [ox,oz] of NAV_NEIGHBORS){
+  const other=polygons.get(key(poly.ix+ox,poly.iz+oz));if(!other)continue;
+  const portal=polygonPortal(poly,other);if(portal)poly.portals.push({to:other,point:portal});
  }
- // Also show current actor-selected bridge hops in yellow.
- for(let i=0;i<navDebugSegments.length;i+=7){/* bridge network already rendered above */}
+ globalPolygonDebugCache=polygons;return polygons;
+}
+function drawNavDebug(){
+ navDebugGroup.clear();if(!navDebug)return;
+ const positions=[],colors=[],polygons=buildGlobalPolygonDebug();
+ const line=(a,b,y,color)=>{positions.push(a.x,y,a.z,b.x,y,b.z);colors.push(...color,...color)};
+ for(const poly of polygons.values()){
+  // Outline every surviving walkable polygon in the loaded global forest.
+  for(let i=0;i<poly.vertices.length;i++)line(poly.vertices[i],poly.vertices[(i+1)%poly.vertices.length],.12,[.1,1,.28]);
+  // Portal links are shown separately so connectivity is visible.
+  for(const edge of poly.portals)line({x:poly.x,z:poly.z},edge.point,.17,[.15,.72,1]);
+ }
+ if(!positions.length)return;
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
- navDebugGroup.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.85})));
+ navDebugGroup.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.9,depthTest:false})));
 }
 function notice(t){const n=document.querySelector('#notice');n.textContent=t;n.style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>n.style.display='none',2500)}
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
@@ -277,7 +287,7 @@ const rakeParticleGroup=new THREE.Group();scene.add(rakeParticleGroup);let rakeP
 const rakeParticleButton=document.querySelector("#rake-vector-toggle");
 function clearRakeParticleGizmos(){for(const c of rakeParticleGroup.children){c.geometry?.dispose();c.material?.dispose()}rakeParticleGroup.clear()}
 function toggleRakeParticleGizmos(){rakeParticleDebugOn=!rakeParticleDebugOn;rakeParticleButton.textContent="RAKE PARTICLES: "+(rakeParticleDebugOn?"ON":"OFF");rakeParticleButton.classList.toggle("active",rakeParticleDebugOn);if(!rakeParticleDebugOn)clearRakeParticleGizmos();else rakeParticleDrawAt=0;notice("Rake particle gizmos "+(rakeParticleDebugOn?"ON":"OFF"))}
-rakeParticleButton.addEventListener("click",()=>{navDebug=!navDebug;rakeParticleButton.textContent="RAKE LOCAL GRID: "+(navDebug?"ON":"OFF");notice("Rake local grid gizmos "+(navDebug?"ON":"OFF"))});
+rakeParticleButton.addEventListener("click",()=>{navDebug=!navDebug;rakeParticleButton.textContent="GLOBAL POLYGON NAVMESH: "+(navDebug?"ON":"OFF");rakeParticleButton.classList.toggle("active",navDebug);notice("Global polygon navmesh gizmos "+(navDebug?"ON":"OFF"))});
 function rakeSegmentClear(a,b,obs){const vx=b.x-a.x,vz=b.z-a.z,l2=vx*vx+vz*vz;for(const o of obs){const r=o.r+RAKE_COLLISION_RADIUS+.12,t=l2>1e-8?THREE.MathUtils.clamp(((o.x-a.x)*vx+(o.z-a.z)*vz)/l2,0,1):0,dx=a.x+vx*t-o.x,dz=a.z+vz*t-o.z;if(dx*dx+dz*dz<r*r)return false}return true}
 function rakeBuildParticleTrail(actor,goal){
  const sx=actor.x,sz=actor.z,dx=goal.x-sx,dz=goal.z-sz,len=Math.hypot(dx,dz);if(len<.15)return null;
