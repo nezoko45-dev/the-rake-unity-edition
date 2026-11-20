@@ -234,6 +234,25 @@ function buildRakePolygonNavmesh(actor,goal){
 }
 const rakeBoundsRaycaster=new THREE.Raycaster();
 const rakeAvoidanceRaycaster=new THREE.Raycaster();
+function rakeObjectBoundsClear(ax,az,bx,bz){
+ const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz);
+ if(length<.025)return true;
+ const nearby=[];
+ for(const o of obstacles){
+  const t=THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/(length*length),0,1);
+  const px=ax+dx*t,pz=az+dz*t;
+  if(o.meshes&&Math.hypot(o.x-px,o.z-pz)<o.r+1.8)nearby.push(...o.meshes);
+ }
+ if(!nearby.length)return true;
+ const direction=new THREE.Vector3(dx/length,0,dz/length);
+ for(const height of RAKE_BOUNDS_HEIGHTS){
+  rakeBoundsRaycaster.set(new THREE.Vector3(ax,height,az),direction);
+  rakeBoundsRaycaster.near=.08;
+  rakeBoundsRaycaster.far=length+1.15;
+  if(rakeBoundsRaycaster.intersectObjects(nearby,false).length)return false;
+ }
+ return true;
+}
 const RAKE_BOUNDS_HEIGHTS=[.55,1.15,1.85,2.55];
 const RAKE_AVOIDANCE_RAY_COUNT=16,RAKE_AVOIDANCE_RANGE=3.8,RAKE_AVOIDANCE_REFRESH=.14;
 const RAKE_AVOIDANCE_HEIGHTS=[1.05,2.05];
