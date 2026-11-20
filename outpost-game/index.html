@@ -62,42 +62,45 @@ function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
 addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'||e.code==='KeyV'){navDebug=!navDebug;rakeParticleButton.textContent="GLOBAL POLYGON NAVMESH: "+(navDebug?"ON":"OFF");rakeParticleButton.classList.toggle("active",navDebug);notice('Global polygon navmesh gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('mousedown',e=>{if(e.button===0)playerRakeHit()});
+const NAV_TRI_CELL=1.5;
+function triangleSamplesClear(vertices){
+ const samples=[];
+ for(let i=0;i<3;i++){
+  const a=vertices[i],b=vertices[(i+1)%3];
+  samples.push(a,{x:(a.x+b.x)*.5,z:(a.z+b.z)*.5});
+ }
+ samples.push({x:(vertices[0].x+vertices[1].x+vertices[2].x)/3,z:(vertices[0].z+vertices[1].z+vertices[2].z)/3});
+ // Carve only the actual obstacle clearance footprint. Do not discard a
+ // whole 3m navigation tile just because an obstacle barely touches a corner.
+ return samples.every(p=>!blocked(p.x,p.z));
+}
 let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
 function buildGlobalPolygonDebug(){
  const signature=[...chunkMap.keys()].sort().join('|');
  if(globalPolygonDebugCache&&signature===globalPolygonDebugSignature)return globalPolygonDebugCache;
  globalPolygonDebugSignature=signature;
- const polygons=new Map(),edges=new Map(),key=(ix,iz,t)=>ix+','+iz+','+t;
- const pointKey=p=>p.x.toFixed(4)+','+p.z.toFixed(4);
- const addEdge=(poly,a,b)=>{
-  const ka=pointKey(a),kb=pointKey(b),ek=ka<kb?ka+'|'+kb:kb+'|'+ka;
-  if(!edges.has(ek))edges.set(ek,[]);edges.get(ek).push({poly,a,b});
- };
- // Cover every loaded chunk's ACTUAL world bounds. Chunks are centered on
- // cx*CHUNK/cz*CHUNK (not [cx*CHUNK,(cx+1)*CHUNK]); assigning cells by
- // their centers prevents both missing strips and duplicate edge cells.
+ const polygons=new Map(),key=(ix,iz,t)=>ix+','+iz+','+t;
+ // Tile the complete union of loaded chunk bounds at 1.5m resolution.
+ // Every tile is assigned by its center, so chunk seams cannot leave strips.
  for(const chunk of chunkMap.values()){
   const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
   const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
-  const minIx=Math.floor(minX/NAV_CELL)-1,maxIx=Math.ceil(maxX/NAV_CELL)+1;
-  const minIz=Math.floor(minZ/NAV_CELL)-1,maxIz=Math.ceil(maxZ/NAV_CELL)+1;
+  const minIx=Math.floor(minX/NAV_TRI_CELL)-1,maxIx=Math.ceil(maxX/NAV_TRI_CELL)+1;
+  const minIz=Math.floor(minZ/NAV_TRI_CELL)-1,maxIz=Math.ceil(maxZ/NAV_TRI_CELL)+1;
   for(let iz=minIz;iz<=maxIz;iz++)for(let ix=minIx;ix<=maxIx;ix++){
-   const x=ix*NAV_CELL,z=iz*NAV_CELL,n=NAV_CELL,cx=x+n*.5,cz=z+n*.5;
-   // A tile belongs to exactly one chunk: the chunk containing its center.
+   const x=ix*NAV_TRI_CELL,z=iz*NAV_TRI_CELL,n=NAV_TRI_CELL,cx=x+n*.5,cz=z+n*.5;
    if(cx<minX||cx>=maxX||cz<minZ||cz>=maxZ)continue;
-   if(!polygonOutsideObjectBounds(ix,iz))continue;
    const A={x,z},B={x:x+n,z},C={x:x+n,z:z+n},D={x,z:z+n};
    const tris=[[A,B,C],[A,C,D]];
    for(let t=0;t<2;t++){
     const vertices=tris[t],tx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,tz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
-    // Each triangle gets its own floor raycast, so every displayed triangle
-    // is backed by a confirmed walkable surface rather than a guessed cell.
-    if(!navSurfaceHit(tx,tz))continue;
+    if(!triangleSamplesClear(vertices)||!navSurfaceHit(tx,tz))continue;
     const poly={ix,iz,tri:t,x:tx,z:tz,vertices,portals:[]};polygons.set(key(ix,iz,t),poly);
    }
   }
  }
- // Connections are tested on demand by direct raycasts during steering.
+ // No BFS or stored connectivity graph: clear walkable links are verified
+ // directly with bridgeClear when the Rake steers between nearby triangles.
  globalPolygonDebugCache=polygons;return polygons;
 }
 let navDebugRendered=false,navDebugDrawnSignature='';
@@ -183,9 +186,9 @@ function buildRakePolygonNavmesh(actor,goal){
  }
  // Only inspect triangles in a small neighborhood around the actor. Each
  // candidate is independently raycast for a clear walkable connection.
- const cell=navCell(actor.x,actor.z),goalDx=goal.x-actor.x,goalDz=goal.z-actor.z;
+ const cell={x:Math.floor(actor.x/NAV_TRI_CELL),z:Math.floor(actor.z/NAV_TRI_CELL)},goalDx=goal.x-actor.x,goalDz=goal.z-actor.z;
  let best=null,bestScore=Infinity;
- for(let ox=-3;ox<=3;ox++)for(let oz=-3;oz<=3;oz++)for(let t=0;t<2;t++){
+ for(let ox=-5;ox<=5;ox++)for(let oz=-5;oz<=5;oz++)for(let t=0;t<2;t++){
   const poly=polygons.get((cell.x+ox)+','+(cell.z+oz)+','+t);if(!poly)continue;
   const dx=poly.x-actor.x,dz=poly.z-actor.z,hop=Math.hypot(dx,dz);
   if(hop<.4||hop>NAV_CELL*4)continue;
