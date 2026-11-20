@@ -177,29 +177,59 @@ function polygonPortal(a,b){
  if(blocked(x,z)||!navSurfaceHit(x,z))return null;
  return{x,z};
 }
+function triangleContainsPoint(poly,x,z){
+ const [a,b,c]=poly.vertices;
+ const v0x=c.x-a.x,v0z=c.z-a.z,v1x=b.x-a.x,v1z=b.z-a.z,v2x=x-a.x,v2z=z-a.z;
+ const dot00=v0x*v0x+v0z*v0z,dot01=v0x*v1x+v0z*v1z,dot02=v0x*v2x+v0z*v2z,dot11=v1x*v1x+v1z*v1z,dot12=v1x*v2x+v1z*v2z;
+ const den=dot00*dot11-dot01*dot01;if(Math.abs(den)<1e-8)return false;
+ const u=(dot11*dot02-dot01*dot12)/den,v=(dot00*dot12-dot01*dot02)/den;
+ return u>=-.001&&v>=-.001&&u+v<=1.001;
+}
+function trianglesShareEdge(a,b){
+ let shared=0;
+ for(const p of a.vertices)for(const q of b.vertices)if(Math.hypot(p.x-q.x,p.z-q.z)<.001){shared++;break}
+ return shared>=2;
+}
 function buildRakePolygonNavmesh(actor,goal){
- const polygons=buildGlobalPolygonDebug();
- // First try a direct walkable ray to the target.
- if(bridgeClear(actor.x,actor.z,goal.x,goal.z)){
-  const p={x:goal.x,z:goal.z,goal:true};
-  return{path:[p],next:p,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ const polygons=buildGlobalPolygonDebug(),all=[...polygons.values()];
+ // Locate the triangle the Rake is physically standing on. If its center is
+ // still the active waypoint, keep walking to that centroid before advancing.
+ let current=null,bestContain=Infinity;
+ for(const poly of all){
+  if(!triangleContainsPoint(poly,actor.x,actor.z))continue;
+  const d=Math.hypot(poly.x-actor.x,poly.z-actor.z);
+  if(d<bestContain){bestContain=d;current=poly}
  }
- // Only inspect triangles in a small neighborhood around the actor. Each
- // candidate is independently raycast for a clear walkable connection.
- const cell={x:Math.floor(actor.x/NAV_TRI_CELL),z:Math.floor(actor.z/NAV_TRI_CELL)},goalDx=goal.x-actor.x,goalDz=goal.z-actor.z;
+ if(!current){
+  let nearest=null,nearestD=Infinity;
+  for(const poly of all){
+   const d=Math.hypot(poly.x-actor.x,poly.z-actor.z);
+   if(d<nearestD&&d<=NAV_TRI_CELL*1.5&&bridgeClear(actor.x,actor.z,poly.x,poly.z)){nearest=poly;nearestD=d}
+  }
+  current=nearest;
+ }
+ if(!current)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ // First reach the centroid of the triangle occupied now. Only after reaching
+ // it may the Rake advance to a triangle sharing an actual edge.
+ const currentDistance=Math.hypot(current.x-actor.x,current.z-actor.z);
+ if(currentDistance>.28){
+  const waypoint={x:current.x,z:current.z,triangle:current.ix+','+current.iz+','+current.tri};
+  return{path:[waypoint],next:waypoint,builtAt:elapsed,target:{x:goal.x,z:goal.z},current};
+ }
  let best=null,bestScore=Infinity;
- for(let ox=-5;ox<=5;ox++)for(let oz=-5;oz<=5;oz++)for(let t=0;t<2;t++){
-  const poly=polygons.get((cell.x+ox)+','+(cell.z+oz)+','+t);if(!poly)continue;
-  const dx=poly.x-actor.x,dz=poly.z-actor.z,hop=Math.hypot(dx,dz);
-  if(hop<.4||hop>NAV_CELL*4)continue;
-  if(dx*goalDx+dz*goalDz<=0)continue;
-  if(!bridgeClear(actor.x,actor.z,poly.x,poly.z))continue;
-  const score=Math.hypot(goal.x-poly.x,goal.z-poly.z)+hop*.12;
-  if(score<bestScore){best=poly;bestScore=score}
+ for(const candidate of all){
+  if(candidate===current||!trianglesShareEdge(current,candidate))continue;
+  if(!bridgeClear(current.x,current.z,candidate.x,candidate.z))continue;
+  const remaining=Math.hypot(goal.x-candidate.x,goal.z-candidate.z);
+  const hop=Math.hypot(candidate.x-current.x,candidate.z-current.z);
+  // Pick only an edge-connected neighboring triangle. Target coordinates
+  // influence which neighbor is chosen, never become a movement waypoint.
+  const score=remaining+hop*.04;
+  if(score<bestScore){best=candidate;bestScore=score}
  }
- if(!best)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ if(!best)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z},current};
  const waypoint={x:best.x,z:best.z,triangle:best.ix+','+best.iz+','+best.tri};
- return{path:[waypoint],next:waypoint,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ return{path:[waypoint],next:waypoint,builtAt:elapsed,target:{x:goal.x,z:goal.z},current};
 }
 function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
