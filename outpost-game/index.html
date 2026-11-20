@@ -153,7 +153,7 @@ function buildRakePolygonNavmesh(actor,goal){
  let best=start,bestScore=Math.hypot(goal.x-start.x,goal.z-start.z);
  for(const poly of queue){const score=Math.hypot(goal.x-poly.x,goal.z-poly.z);if(score<bestScore){best=poly;bestScore=score}}
  const path=[];let cursor=best;
- while(cursor!==start){const link=parent.get(key(cursor.ix,cursor.iz));if(!link)break;path.push(link.portal);cursor=link.from}
+ while(cursor!==start){const link=parent.get(key(cursor.ix,cursor.iz));if(!link)break;const pd=Math.hypot(cursor.x-link.portal.x,cursor.z-link.portal.z)||1;path.push({x:link.portal.x+(cursor.x-link.portal.x)/pd*.38,z:link.portal.z+(cursor.z-link.portal.z)/pd*.38});cursor=link.from}
  path.reverse();
  if(path.length&&bridgeClear(actor.x,actor.z,path[0].x,path[0].z)===false)path.shift();
  return{polygons,path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
