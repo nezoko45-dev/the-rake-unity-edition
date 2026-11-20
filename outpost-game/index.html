@@ -73,21 +73,27 @@ function buildGlobalPolygonDebug(){
   const ka=pointKey(a),kb=pointKey(b),ek=ka<kb?ka+'|'+kb:kb+'|'+ka;
   if(!edges.has(ek))edges.set(ek,[]);edges.get(ek).push({poly,a,b});
  };
- // Each walkable forest tile is split into two real triangular polygons.
+ // Cover every loaded chunk's ACTUAL world bounds. Chunks are centered on
+ // cx*CHUNK/cz*CHUNK (not [cx*CHUNK,(cx+1)*CHUNK]); assigning cells by
+ // their centers prevents both missing strips and duplicate edge cells.
  for(const chunk of chunkMap.values()){
-  const minIx=Math.floor(chunk.cx*CHUNK/NAV_CELL),maxIx=Math.ceil((chunk.cx+1)*CHUNK/NAV_CELL)-1;
-  const minIz=Math.floor(chunk.cz*CHUNK/NAV_CELL),maxIz=Math.ceil((chunk.cz+1)*CHUNK/NAV_CELL)-1;
+  const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
+  const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
+  const minIx=Math.floor(minX/NAV_CELL)-1,maxIx=Math.ceil(maxX/NAV_CELL)+1;
+  const minIz=Math.floor(minZ/NAV_CELL)-1,maxIz=Math.ceil(maxZ/NAV_CELL)+1;
   for(let iz=minIz;iz<=maxIz;iz++)for(let ix=minIx;ix<=maxIx;ix++){
+   const x=ix*NAV_CELL,z=iz*NAV_CELL,n=NAV_CELL,cx=x+n*.5,cz=z+n*.5;
+   // A tile belongs to exactly one chunk: the chunk containing its center.
+   if(cx<minX||cx>=maxX||cz<minZ||cz>=maxZ)continue;
    if(!polygonOutsideObjectBounds(ix,iz))continue;
-   const x=ix*NAV_CELL,z=iz*NAV_CELL,n=NAV_CELL;
    const A={x,z},B={x:x+n,z},C={x:x+n,z:z+n},D={x,z:z+n};
    const tris=[[A,B,C],[A,C,D]];
    for(let t=0;t<2;t++){
-    const vertices=tris[t],cx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,cz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
-    // The forest floor is one continuous ground mesh. One center raycast
-    // per triangle is sufficient; obstacle bounds are checked separately.
-    if(!navSurfaceHit(cx,cz))continue;
-    const poly={ix,iz,tri:t,x:cx,z:cz,vertices,portals:[]};polygons.set(key(ix,iz,t),poly);
+    const vertices=tris[t],tx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,tz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
+    // Each triangle gets its own floor raycast, so every displayed triangle
+    // is backed by a confirmed walkable surface rather than a guessed cell.
+    if(!navSurfaceHit(tx,tz))continue;
+    const poly={ix,iz,tri:t,x:tx,z:tz,vertices,portals:[]};polygons.set(key(ix,iz,t),poly);
    }
   }
  }
