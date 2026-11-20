@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE RAKE: FOREST FREEPLAY</title>
 <style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#080b10;color:#e8edf2;font:14px system-ui}canvas{display:block}#hud,#help,#notice{position:fixed;background:#071019d9;border:1px solid #52708066;border-radius:9px;padding:12px;z-index:2}#hud{top:14px;left:14px;min-width:210px}#help{bottom:14px;left:14px;color:#bac8d2;line-height:1.6}#notice{top:18%;left:50%;transform:translateX(-50%);display:none;color:#ffd5a0}#cross{position:fixed;left:50%;top:50%;width:7px;height:7px;border:1px solid white;border-radius:50%}#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#020509df;z-index:5;text-align:center}#panel{max-width:500px;padding:30px}button{padding:12px 20px;border:0;border-radius:6px;background:#d8a25e;font-weight:800;cursor:pointer}.debug-toggle{margin-top:9px;padding:6px 9px;border:1px solid #668397;border-radius:5px;background:#172633;color:#dceaf2;font-size:11px;font-weight:800;letter-spacing:.04em}.debug-toggle.active{background:#24533a;border-color:#68d99a;color:#baffd1}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script></head><body>
-<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE POLYGON NAVMESH: OFF</button><button id="rake-avoidance-toggle" class="debug-toggle" type="button">RAKE AVOIDANCE RAYS: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
+<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-avoidance-toggle" class="debug-toggle" type="button">RAKE AVOIDANCE RAYS: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click mouse lock<br>Freeplay · Explore the forest</div><div id="cross"></div><div id="notice"></div>
 <div id="overlay"><div id="panel"><h1>THE RAKE: FOREST FREEPLAY</h1><p>No objectives. No missions. Just freeplay—explore while the hunter roams and reacts to you.</p><p><small>Same Rake model and soundtrack assets; new map and AI behavior.</small></p><button id="start">ENTER THE FOREST</button></div></div>
 <script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
@@ -15,7 +15,7 @@ const controls=new PointerLockControls(camera,renderer.domElement);scene.add(con
 const hemi=new THREE.HemisphereLight(0xc8e4ff,0x34452e,2.2);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffe3b0,2.0);sun.position.set(-20,35,12);scene.add(sun);
 const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});const bark=mat(0x33251b),leaf=mat(0x172d20),leaf2=mat(0x243d29),rock=mat(0x343b3b),pathMat=mat(0x3c3b32);
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(900,900),mat(0x18251b));ground.rotation.x=-Math.PI/2;scene.add(ground);const navSurfaceRaycaster=new THREE.Raycaster();
-const obstacles=[];function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block)obstacles.push({x,z,r:Math.max(sx,sz)*.52});return o}
+const obstacles=[];function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block)obstacles.push({x,z,r:Math.max(sx,sz)*.52,meshes:[o]});return o}
 const trail=new THREE.Mesh(new THREE.PlaneGeometry(12,260),pathMat);trail.rotation.x=-Math.PI/2;trail.position.y=.015;scene.add(trail);
 const trail2=new THREE.Mesh(new THREE.PlaneGeometry(180,9),pathMat);trail2.rotation.x=-Math.PI/2;trail2.position.y=.02;scene.add(trail2);
 let seed=931;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
@@ -60,7 +60,7 @@ const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState
 function playRakeHurtSound(){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),now=ctx.currentTime;const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(260,now);osc.frequency.exponentialRampToValueAtTime(72,now+.42);filter.type='lowpass';filter.frequency.value=950;gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.22,now+.035);gain.gain.exponentialRampToValueAtTime(.0001,now+.62);osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.65);setTimeout(()=>ctx.close(),900)}catch(e){}}
 function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math.max(0,rakeHP-45);rakeDamageCd=3;rakeHurtUntil=elapsed+1.15;rakeSlowUntil=elapsed+1.8;attackAnimUntil=0;anim(/hurt1|hurt/i);if(action)action.timeScale=1;playRakeHurtSound();notice(source+' hit THE RAKE (-45) · '+rakeHP+' HP');return true}
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
-addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'||e.code==='KeyV'){navDebug=!navDebug;rakeParticleButton.textContent="GLOBAL POLYGON NAVMESH: "+(navDebug?"ON":"OFF");rakeParticleButton.classList.toggle("active",navDebug);notice('Global polygon navmesh gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}});addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('mousedown',e=>{if(e.button===0)playerRakeHit()});
 const NAV_TRI_CELL=1.5;
 function triangleSamplesClear(vertices){
@@ -329,21 +329,40 @@ function drawRakeAvoidanceGizmos(){
  }
 }
 function polygonGlobalMove(actor,goal,dt,speed){
- if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
- let mesh=actor.rakePolygonNavmesh;
- if(!mesh||elapsed-mesh.builtAt>=RAKE_LOCAL_REFRESH||
-    Math.hypot(goal.x-mesh.target.x,goal.z-mesh.target.z)>1.25||
-    !mesh.next||Math.hypot(actor.x-mesh.next.x,actor.z-mesh.next.z)<.38){
-  mesh=buildRakePolygonNavmesh(actor,goal);actor.rakePolygonNavmesh=mesh;
+ if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
+ const gx=goal.x-actor.x,gz=goal.z-actor.z,goalDistance=Math.hypot(gx,gz);
+ if(goalDistance<.12)return;
+ // Direct raycast steering: score the sampled radial object-bound directions
+ // by progress toward the goal and available clearance. No triangles, cells,
+ // route graph, BFS, DFS, or waypoint generation are involved.
+ const samples=sampleRakeObjectBounds(actor),count=RAKE_AVOIDANCE_RAY_COUNT;
+ const desired=Math.atan2(gx,gz);
+ let best=null,bestScore=-Infinity;
+ for(let i=0;i<count;i++){
+  const angle=i/count*Math.PI*2,group=samples.samples.slice(i*2,i*2+2);
+  const clearance=Math.min(...group.map(q=>q.hitDistance));
+  const alignment=Math.cos(angle-desired);
+  const turn=actor.rakeSteerAngle==null?0:Math.abs(Math.atan2(Math.sin(angle-actor.rakeSteerAngle),Math.cos(angle-actor.rakeSteerAngle)));
+  // Reject directions that cannot safely fit even a short movement step.
+  if(clearance<.42)continue;
+  const score=alignment*4+Math.min(clearance,RAKE_AVOIDANCE_RANGE)*.2-turn*.24;
+  if(score>bestScore){bestScore=score;best={angle,clearance}}
  }
- const waypoint=mesh.next;if(!waypoint)return;
- const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,d=Math.hypot(dx,dz);
- if(d<.02)return;
- // Movement is centroid-to-centroid, never along triangle perimeter/outline.
- // Revalidate the complete step so a changed obstacle or surface cannot be crossed.
- const step=Math.min(Math.max(0,speed*dt),d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;
- if(!bridgeClear(actor.x,actor.z,nx,nz)||!rakeObjectBoundsClear(actor.x,actor.z,nx,nz)||!navSurfaceHit(nx,nz)){actor.rakePolygonNavmesh=null;return}
- actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz);
+ if(!best)return;
+ actor.rakeSteerAngle=best.angle;
+ const directionX=Math.sin(best.angle),directionZ=Math.cos(best.angle);
+ let step=Math.min(speed*dt,goalDistance,best.clearance-.28);
+ if(step<.015)return;
+ // Recheck the exact movement segment at the Rake's body heights before
+ // committing. If a narrow obstacle clips the step, shorten it progressively.
+ for(let attempt=0;attempt<4;attempt++){
+  const nx=actor.x+directionX*step,nz=actor.z+directionZ*step;
+  if(!blocked(nx,nz)&&rakeObjectBoundsClear(actor.x,actor.z,nx,nz)&&navSurfaceHit(nx,nz)){
+   actor.x=nx;actor.z=nz;actor.yaw=best.angle;return;
+  }
+  step*=.5;
+  if(step<.025)break;
+ }
 }
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
@@ -438,7 +457,7 @@ const rakeParticleGroup=new THREE.Group();scene.add(rakeParticleGroup);let rakeP
 const rakeParticleButton=document.querySelector("#rake-vector-toggle");
 function clearRakeParticleGizmos(){for(const c of rakeParticleGroup.children){c.geometry?.dispose();c.material?.dispose()}rakeParticleGroup.clear()}
 function toggleRakeParticleGizmos(){rakeParticleDebugOn=!rakeParticleDebugOn;rakeParticleButton.textContent="RAKE PARTICLES: "+(rakeParticleDebugOn?"ON":"OFF");rakeParticleButton.classList.toggle("active",rakeParticleDebugOn);if(!rakeParticleDebugOn)clearRakeParticleGizmos();else rakeParticleDrawAt=0;notice("Rake particle gizmos "+(rakeParticleDebugOn?"ON":"OFF"))}
-rakeParticleButton.addEventListener("click",()=>{navDebug=!navDebug;rakeParticleButton.textContent="GLOBAL POLYGON NAVMESH: "+(navDebug?"ON":"OFF");rakeParticleButton.classList.toggle("active",navDebug);notice("Global polygon navmesh gizmos "+(navDebug?"ON":"OFF"))});
+
 function rakeSegmentClear(a,b,obs){const vx=b.x-a.x,vz=b.z-a.z,l2=vx*vx+vz*vz;for(const o of obs){const r=o.r+RAKE_COLLISION_RADIUS+.12,t=l2>1e-8?THREE.MathUtils.clamp(((o.x-a.x)*vx+(o.z-a.z)*vz)/l2,0,1):0,dx=a.x+vx*t-o.x,dz=a.z+vz*t-o.z;if(dx*dx+dz*dz<r*r)return false}return true}
 function rakeBuildParticleTrail(actor,goal){
  const sx=actor.x,sz=actor.z,dx=goal.x-sx,dz=goal.z-sz,len=Math.hypot(dx,dz);if(len<.15)return null;
@@ -529,7 +548,7 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();drawRakeParticleGizmos();drawRakeAvoidanceGizmos();
+  updateSurvivors(dt);moveEnemy(dt);drawRakeParticleGizmos();drawRakeAvoidanceGizmos();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';
   document.querySelector('#bar').style.width=player.hp+'%';
