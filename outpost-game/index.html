@@ -360,24 +360,34 @@ function polygonGlobalMove(actor,goal,dt,speed){
  let steeringAngle=desired,best=null,bestScore=-Infinity;
  if(follow){
   // Move tangent to the detected object boundary, with a small outward bias.
-  // Candidate directions are still chosen exclusively from the radial rays.
   const tangent=wrap(follow.wallAngle+follow.side*Math.PI*.5);
   const outward=wrap(follow.wallAngle+Math.PI);
   steeringAngle=wrap(tangent+wrap(outward-tangent)*.16);
  }else steeringAngle=desired;
+ const requestedStep=Math.min(speed*dt,goalDistance);
+ const scoredDirections=[];
  for(let i=0;i<count;i++){
   const angle=i/count*Math.PI*2,clearance=clearanceAt(i);
-  if(clearance<.38)continue;
+  const dx=Math.sin(angle),dz=Math.cos(angle);
+  const travel=Math.min(requestedStep,Math.max(0,clearance-.3));
+  const nx=actor.x+dx*travel,nz=actor.z+dz*travel;
+  // A direction is terminated when its scored movement segment enters an
+  // obstacle bound. Only surviving, walkable directions receive a score.
+  const terminated=clearance<.38||travel<.025||
+   !rakeObjectBoundsClear(actor.x,actor.z,nx,nz)||blocked(nx,nz)||!navSurfaceHit(nx,nz);
+  if(terminated){scoredDirections.push({angle,score:-Infinity,walkable:false});continue}
   const alignment=Math.cos(angle-steeringAngle);
   const targetProgress=Math.cos(angle-desired);
   const turn=actor.rakeSteerAngle==null?0:Math.abs(wrap(angle-actor.rakeSteerAngle));
   const score=alignment*(follow?5.2:4.4)+targetProgress*(follow?.65:1.1)+Math.min(clearance,RAKE_AVOIDANCE_RANGE)*.16-turn*.12;
-  if(score>bestScore){bestScore=score;best={angle,clearance}}
+  scoredDirections.push({angle,score,walkable:true,clearance,travel});
+  if(score>bestScore){bestScore=score;best={angle,clearance,travel}}
  }
+ actor.rakeDirectionScores=scoredDirections;
  if(!best)return;
  actor.rakeSteerAngle=best.angle;
  const directionX=Math.sin(best.angle),directionZ=Math.cos(best.angle);
- let step=Math.min(speed*dt,goalDistance,best.clearance-.3);
+ let step=best.travel;
  if(step<.015)return;
  for(let attempt=0;attempt<5;attempt++){
   const nx=actor.x+directionX*step,nz=actor.z+directionZ*step;
