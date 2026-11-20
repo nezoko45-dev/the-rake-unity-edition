@@ -67,19 +67,34 @@ function buildGlobalPolygonDebug(){
  const signature=[...chunkMap.keys()].sort().join('|');
  if(globalPolygonDebugCache&&signature===globalPolygonDebugSignature)return globalPolygonDebugCache;
  globalPolygonDebugSignature=signature;
- const polygons=new Map(),key=(x,z)=>x+','+z;
- // Build polygons across every currently generated forest chunk, not just
- // the Rake's local neighborhood. Object bounds carve tiles before raycasts.
+ const polygons=new Map(),edges=new Map(),key=(ix,iz,t)=>ix+','+iz+','+t;
+ const pointKey=p=>p.x.toFixed(4)+','+p.z.toFixed(4);
+ const addEdge=(poly,a,b)=>{
+  const ka=pointKey(a),kb=pointKey(b),ek=ka<kb?ka+'|'+kb:kb+'|'+ka;
+  if(!edges.has(ek))edges.set(ek,[]);edges.get(ek).push({poly,a,b});
+ };
+ // Each walkable forest tile is split into two real triangular polygons.
  for(const chunk of chunkMap.values()){
   const minIx=Math.floor(chunk.cx*CHUNK/NAV_CELL),maxIx=Math.ceil((chunk.cx+1)*CHUNK/NAV_CELL)-1;
   const minIz=Math.floor(chunk.cz*CHUNK/NAV_CELL),maxIz=Math.ceil((chunk.cz+1)*CHUNK/NAV_CELL)-1;
   for(let iz=minIz;iz<=maxIz;iz++)for(let ix=minIx;ix<=maxIx;ix++){
-   const poly=makeRakePolygon(ix,iz);if(poly)polygons.set(key(ix,iz),poly);
+   if(!polygonOutsideObjectBounds(ix,iz))continue;
+   const x=ix*NAV_CELL,z=iz*NAV_CELL,n=NAV_CELL;
+   const A={x,z},B={x:x+n,z},C={x:x+n,z:z+n},D={x,z:z+n};
+   const tris=[[A,B,C],[A,C,D]];
+   for(let t=0;t<2;t++){
+    const vertices=tris[t],cx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,cz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
+    if(!navSurfaceHit(cx,cz)||vertices.some(v=>!navSurfaceHit(v.x,v.z)))continue;
+    const poly={ix,iz,tri:t,x:cx,z:cz,vertices,portals:[]};polygons.set(key(ix,iz,t),poly);
+    for(let e=0;e<3;e++)addEdge(poly,vertices[e],vertices[(e+1)%3]);
+   }
   }
  }
- for(const poly of polygons.values())for(const [ox,oz] of NAV_NEIGHBORS){
-  const other=polygons.get(key(poly.ix+ox,poly.iz+oz));if(!other)continue;
-  const portal=polygonPortal(poly,other);if(portal)poly.portals.push({to:other,point:portal});
+ // Matching triangle edges become portals only when the shared edge is clear.
+ for(const pair of edges.values())if(pair.length===2){
+  const [a,b]=pair,m={x:(a.a.x+a.b.x)*.5,z:(a.a.z+a.b.z)*.5};
+  if(blocked(m.x,m.z)||!navSurfaceHit(m.x,m.z))continue;
+  a.poly.portals.push({to:b.poly,point:m});b.poly.portals.push({to:a.poly,point:m});
  }
  globalPolygonDebugCache=polygons;return polygons;
 }
@@ -104,7 +119,7 @@ function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 // carve polygons out first; downward floor raycasts then verify the remaining
 // polygon samples are actually over the walkable ground surface.
 let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,0],[1,0],[0,-1],[0,1]];
-const RAKE_LOCAL_RADIUS=6,RAKE_LOCAL_REFRESH=.32;
+const RAKE_LOCAL_RADIUS=6,RAKE_LOCAL_REFRESH=.65;
 function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
 function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
 function navSurfaceHit(x,z){
@@ -152,34 +167,20 @@ function polygonPortal(a,b){
  return{x,z};
 }
 function buildRakePolygonNavmesh(actor,goal){
- const base=navCell(actor.x,actor.z),polygons=new Map(),key=(x,z)=>x+','+z;
- for(let iz=base.z-RAKE_LOCAL_RADIUS;iz<=base.z+RAKE_LOCAL_RADIUS;iz++)for(let ix=base.x-RAKE_LOCAL_RADIUS;ix<=base.x+RAKE_LOCAL_RADIUS;ix++){
-  const poly=makeRakePolygon(ix,iz);if(poly)polygons.set(key(ix,iz),poly);
- }
- for(const poly of polygons.values())for(const [ox,oz] of NAV_NEIGHBORS){
-  const other=polygons.get(key(poly.ix+ox,poly.iz+oz));if(!other)continue;
-  const portal=polygonPortal(poly,other);if(portal)poly.portals.push({to:other,point:portal});
- }
- let start=null,startDistance=Infinity;
- for(const poly of polygons.values()){
-  const d=Math.hypot(poly.x-actor.x,poly.z-actor.z);
-  if(d<startDistance&&d<NAV_CELL*1.8&&navSurfaceHit(actor.x,actor.z)&&bridgeClear(actor.x,actor.z,poly.x,poly.z)){start=poly;startDistance=d}
- }
- if(!start)return{polygons,path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
- const queue=[start],parent=new Map([[key(start.ix,start.iz),null]]);
- for(let i=0;i<queue.length;i++)for(const edge of queue[i].portals){
-  const other=edge.to,k=key(other.ix,other.iz);if(parent.has(k))continue;
-  parent.set(k,{from:queue[i],portal:edge.point});queue.push(other);
- }
- let best=start,bestScore=Math.hypot(goal.x-start.x,goal.z-start.z);
- for(const poly of queue){const score=Math.hypot(goal.x-poly.x,goal.z-poly.z);if(score<bestScore){best=poly;bestScore=score}}
+ const polygons=buildGlobalPolygonDebug();let start=null,startD=Infinity;
+ for(const poly of polygons.values()){const d=Math.hypot(poly.x-actor.x,poly.z-actor.z);if(d<startD&&d<NAV_CELL*1.8&&bridgeClear(actor.x,actor.z,poly.x,poly.z)){start=poly;startD=d}}
+ if(!start)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ const id=p=>p.ix+','+p.iz+','+p.tri,queue=[start],parent=new Map([[id(start),null]]);
+ for(let i=0;i<queue.length;i++)for(const edge of queue[i].portals){const k=id(edge.to);if(parent.has(k))continue;parent.set(k,{from:queue[i],portal:edge.point});queue.push(edge.to)}
+ let best=start,bestD=Math.hypot(goal.x-start.x,goal.z-start.z);
+ for(const poly of queue){const d=Math.hypot(goal.x-poly.x,goal.z-poly.z);if(d<bestD){best=poly;bestD=d}}
  const path=[];let cursor=best;
- while(cursor!==start){const link=parent.get(key(cursor.ix,cursor.iz));if(!link)break;const pd=Math.hypot(cursor.x-link.portal.x,cursor.z-link.portal.z)||1;path.push({x:link.portal.x+(cursor.x-link.portal.x)/pd*.38,z:link.portal.z+(cursor.z-link.portal.z)/pd*.38});cursor=link.from}
+ while(cursor!==start){const link=parent.get(id(cursor));if(!link)break;path.push({x:link.portal.x,z:link.portal.z});cursor=link.from}
  path.reverse();
- if(path.length&&bridgeClear(actor.x,actor.z,path[0].x,path[0].z)===false)path.shift();
- return{polygons,path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ if(path.length&&Math.hypot(actor.x-path[0].x,actor.z-path[0].z)<.28)path.shift();
+ return{path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
 }
-function rakeLocalGridMove(actor,goal,dt,speed){
+function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
  let mesh=actor.rakePolygonNavmesh;
  if(!mesh||elapsed-mesh.builtAt>=RAKE_LOCAL_REFRESH||
@@ -262,7 +263,7 @@ const hands=[];for(const a of arms){const h=new THREE.Mesh(new THREE.SphereGeome
 for(let i=0;i<4;i++)survivors.push(makeSurvivor([-8,8,-8,8][i],[8,8,-8,-8][i],i));
 function updateSurvivors(dt){const p=controls.getObject().position;for(const a of survivors){if(monster&&a.hp>0&&a.mesh.visible&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<=8&&rakeDamageCd<=0)damageRake('Survivor '+(a.id+1));if(a.hp<=0){if(elapsed>=a.respawnAt){a.hp=100;a.x=a.spawnX;a.z=a.spawnZ;a.mesh.visible=true;a.target=null;a.nextPick=elapsed+1;notice('A survivor respawned')}else{a.mesh.visible=false;continue}}const rakeD=Math.hypot(monster?monster.position.x-a.x:999,monster?monster.position.z-a.z:999);a.attack=!!monster&&rakeD<2.8;let moving=false;if(a.attack){a.mesh.rotation.y=Math.atan2(monster.position.x-a.x,monster.position.z-a.z);a.phase+=dt*8;a.arms[0].rotation.x=-1.8+Math.sin(a.phase)*.25;a.arms[1].rotation.x=-1.8-Math.sin(a.phase)*.25;a.legs[0].rotation.x=0;a.legs[1].rotation.x=0}
 else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){let tx=a.x,tz=a.z;for(let tries=0;tries<14;tries++){const angle=rand()*Math.PI*2,dist=8+rand()*22;tx=a.x+Math.cos(angle)*dist;tz=a.z+Math.sin(angle)*dist;if(!blocked(tx,tz))break}a.target={x:tx,z:tz};a.nextPick=elapsed+5+rand()*6}
-const beforeX=a.x,beforeZ=a.z;cellBridgeMove(a,a.target,dt,randWalkSpeed(a));moving=Math.hypot(a.x-beforeX,a.z-beforeZ)>.002;if(moving)a.mesh.rotation.y=Math.atan2(a.target.x-a.x,a.target.z-a.z);a.phase+=dt*(moving?7:2);const swing=moving?Math.sin(a.phase)*.65:Math.sin(a.phase)*.04;a.legs[0].rotation.x=swing;a.legs[1].rotation.x=-swing;a.arms[0].rotation.x=-swing*.7;a.arms[1].rotation.x=swing*.7}
+const beforeX=a.x,beforeZ=a.z;polygonGlobalMove(a,a.target,dt,randWalkSpeed(a));moving=Math.hypot(a.x-beforeX,a.z-beforeZ)>.002;if(moving)a.mesh.rotation.y=Math.atan2(a.target.x-a.x,a.target.z-a.z);a.phase+=dt*(moving?7:2);const swing=moving?Math.sin(a.phase)*.65:Math.sin(a.phase)*.04;a.legs[0].rotation.x=swing;a.legs[1].rotation.x=-swing;a.arms[0].rotation.x=-swing*.7;a.arms[1].rotation.x=swing*.7}
 a.mesh.position.set(a.x,Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)}}
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
 
@@ -351,7 +352,7 @@ function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamage
   }
  }
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
- const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;rakeLocalGridMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
+ const navActor=monster.navActor||(monster.navActor={x:monster.position.x,z:monster.position.z});navActor.x=monster.position.x;navActor.z=monster.position.z;polygonGlobalMove(navActor,goal,dt,enemySpeed);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1)monster.rotation.y=THREE.MathUtils.damp(monster.rotation.y,navActor.yaw??Math.atan2(gx,gz),7,dt);
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),goalDistance=goal?Math.hypot(goal.x-monster.position.x,goal.z-monster.position.z):0,moving=goalDistance>.65&&enemySpeed>0;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
