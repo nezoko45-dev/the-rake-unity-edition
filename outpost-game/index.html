@@ -84,46 +84,35 @@ function buildGlobalPolygonDebug(){
    const tris=[[A,B,C],[A,C,D]];
    for(let t=0;t<2;t++){
     const vertices=tris[t],cx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,cz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
-    if(!navSurfaceHit(cx,cz)||vertices.some(v=>!navSurfaceHit(v.x,v.z)))continue;
+    // The forest floor is one continuous ground mesh. One center raycast
+    // per triangle is sufficient; obstacle bounds are checked separately.
+    if(!navSurfaceHit(cx,cz))continue;
     const poly={ix,iz,tri:t,x:cx,z:cz,vertices,portals:[]};polygons.set(key(ix,iz,t),poly);
-    for(let e=0;e<3;e++)addEdge(poly,vertices[e],vertices[(e+1)%3]);
    }
   }
  }
- // Raycast between nearby triangle centroids. A connection exists only
- // when the full corridor is clear and every sample has walkable ground.
- for(const a of polygons.values()){
-  for(let ox=-2;ox<=2;ox++)for(let oz=-2;oz<=2;oz++){
-   if(ox===0&&oz===0)continue;
-   const candidates=[polygons.get(key(a.ix+ox,a.iz+oz,0)),polygons.get(key(a.ix+ox,a.iz+oz,1))];
-   for(const b of candidates){
-    if(!b||b===a||b.portals.some(link=>link.to===a))continue;
-    if(!bridgeClear(a.x,a.z,b.x,b.z))continue;
-    a.portals.push({to:b,point:{x:(a.x+b.x)*.5,z:(a.z+b.z)*.5}});
-   }
-  }
- }
+ // Connections are tested on demand by direct raycasts during steering.
  globalPolygonDebugCache=polygons;return polygons;
 }
+let navDebugRendered=false,navDebugDrawnSignature='';
 function drawNavDebug(){
- navDebugGroup.clear();if(!navDebug)return;
- const polygons=buildGlobalPolygonDebug(),facePositions=[],edgePositions=[],portalPositions=[];
+ if(!navDebug){if(navDebugRendered)navDebugGroup.clear();navDebugRendered=false;return}
+ const polygons=buildGlobalPolygonDebug();
+ // Keep the expensive debug geometry static; do not rebuild thousands of
+ // vertices and GPU objects every animation frame.
+ if(navDebugRendered&&navDebugDrawnSignature===globalPolygonDebugSignature)return;
+ navDebugGroup.clear();navDebugDrawnSignature=globalPolygonDebugSignature;navDebugRendered=true;
+ const facePositions=[],edgePositions=[];
  for(const poly of polygons.values()){
   const [a,b,c]=poly.vertices;
   facePositions.push(a.x,.105,a.z,b.x,.105,b.z,c.x,.105,c.z);
   for(let i=0;i<3;i++){const p=poly.vertices[i],q=poly.vertices[(i+1)%3];edgePositions.push(p.x,.14,p.z,q.x,.14,q.z)}
-  for(const edge of poly.portals)portalPositions.push(poly.x,.19,poly.z,edge.to.x,.19,edge.to.z);
  }
  if(facePositions.length){
   const fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.Float32BufferAttribute(facePositions,3));
   navDebugGroup.add(new THREE.Mesh(fg,new THREE.MeshBasicMaterial({color:0x24d66b,side:THREE.DoubleSide,transparent:true,opacity:.24,depthTest:false})));
  }
- const addLines=(positions,color,opacity)=>{
-  if(!positions.length)return;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
-  navDebugGroup.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color,transparent:true,opacity,depthTest:false})));
- };
- addLines(edgePositions,0x28ff72,.95);
- addLines(portalPositions,0x38bfff,.8);
+ if(edgePositions.length){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(edgePositions,3));navDebugGroup.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0x28ff72,transparent:true,opacity:.95,depthTest:false})));}
 }
 function notice(t){const n=document.querySelector('#notice');n.textContent=t;n.style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>n.style.display='none',2500)}
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
@@ -181,25 +170,26 @@ function polygonPortal(a,b){
 }
 function buildRakePolygonNavmesh(actor,goal){
  const polygons=buildGlobalPolygonDebug();
- // No BFS or graph traversal: choose a nearby triangle only when a direct
- // raycast proves the actor-to-triangle corridor is clear and walkable.
+ // First try a direct walkable ray to the target.
  if(bridgeClear(actor.x,actor.z,goal.x,goal.z)){
-  return{path:[{x:goal.x,z:goal.z,goal:true}],next:{x:goal.x,z:goal.z,goal:true},builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+  const p={x:goal.x,z:goal.z,goal:true};
+  return{path:[p],next:p,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
  }
- const currentDistance=Math.hypot(goal.x-actor.x,goal.z-actor.z);
- let best=null,bestScore=Infinity,bestKey='';
- for(const poly of polygons.values()){
+ // Only inspect triangles in a small neighborhood around the actor. Each
+ // candidate is independently raycast for a clear walkable connection.
+ const cell=navCell(actor.x,actor.z),goalDx=goal.x-actor.x,goalDz=goal.z-actor.z;
+ let best=null,bestScore=Infinity;
+ for(let ox=-3;ox<=3;ox++)for(let oz=-3;oz<=3;oz++)for(let t=0;t<2;t++){
+  const poly=polygons.get((cell.x+ox)+','+(cell.z+oz)+','+t);if(!poly)continue;
   const dx=poly.x-actor.x,dz=poly.z-actor.z,hop=Math.hypot(dx,dz);
-  if(hop<.45||hop>NAV_CELL*3.5)continue;
-  if(dx*(goal.x-actor.x)+dz*(goal.z-actor.z)<=0)continue;
+  if(hop<.4||hop>NAV_CELL*4)continue;
+  if(dx*goalDx+dz*goalDz<=0)continue;
   if(!bridgeClear(actor.x,actor.z,poly.x,poly.z))continue;
-  const remaining=Math.hypot(goal.x-poly.x,goal.z-poly.z);
-  const score=remaining+hop*.12;
-  const triangleKey=poly.ix+','+poly.iz+','+poly.tri;
-  if(score<bestScore){best=poly;bestScore=score;bestKey=triangleKey}
+  const score=Math.hypot(goal.x-poly.x,goal.z-poly.z)+hop*.12;
+  if(score<bestScore){best=poly;bestScore=score}
  }
  if(!best)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
- const waypoint={x:best.x,z:best.z,triangle:bestKey};
+ const waypoint={x:best.x,z:best.z,triangle:best.ix+','+best.iz+','+best.tri};
  return{path:[waypoint],next:waypoint,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
 }
 function polygonGlobalMove(actor,goal,dt,speed){
