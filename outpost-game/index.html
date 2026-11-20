@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE RAKE: FOREST FREEPLAY</title>
 <style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#080b10;color:#e8edf2;font:14px system-ui}canvas{display:block}#hud,#help,#notice{position:fixed;background:#071019d9;border:1px solid #52708066;border-radius:9px;padding:12px;z-index:2}#hud{top:14px;left:14px;min-width:210px}#help{bottom:14px;left:14px;color:#bac8d2;line-height:1.6}#notice{top:18%;left:50%;transform:translateX(-50%);display:none;color:#ffd5a0}#cross{position:fixed;left:50%;top:50%;width:7px;height:7px;border:1px solid white;border-radius:50%}#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#020509df;z-index:5;text-align:center}#panel{max-width:500px;padding:30px}button{padding:12px 20px;border:0;border-radius:6px;background:#d8a25e;font-weight:800;cursor:pointer}.debug-toggle{margin-top:9px;padding:6px 9px;border:1px solid #668397;border-radius:5px;background:#172633;color:#dceaf2;font-size:11px;font-weight:800;letter-spacing:.04em}.debug-toggle.active{background:#24533a;border-color:#68d99a;color:#baffd1}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script></head><body>
-<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE LOCAL GRID: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
+<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE POLYGON NAVMESH: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click mouse lock<br>Freeplay · Explore the forest</div><div id="cross"></div><div id="notice"></div>
 <div id="overlay"><div id="panel"><h1>THE RAKE: FOREST FREEPLAY</h1><p>No objectives. No missions. Just freeplay—explore while the hunter roams and reacts to you.</p><p><small>Same Rake model and soundtrack assets; new map and AI behavior.</small></p><button id="start">ENTER THE FOREST</button></div></div>
 <script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
@@ -14,7 +14,7 @@ const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(
 const controls=new PointerLockControls(camera,renderer.domElement);scene.add(controls.getObject());controls.getObject().position.set(0,2,14);
 const hemi=new THREE.HemisphereLight(0xc8e4ff,0x34452e,2.2);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffe3b0,2.0);sun.position.set(-20,35,12);scene.add(sun);
 const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});const bark=mat(0x33251b),leaf=mat(0x172d20),leaf2=mat(0x243d29),rock=mat(0x343b3b),pathMat=mat(0x3c3b32);
-const ground=new THREE.Mesh(new THREE.PlaneGeometry(900,900),mat(0x18251b));ground.rotation.x=-Math.PI/2;scene.add(ground);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(900,900),mat(0x18251b));ground.rotation.x=-Math.PI/2;scene.add(ground);const navSurfaceRaycaster=new THREE.Raycaster();
 const obstacles=[];function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block)obstacles.push({x,z,r:Math.max(sx,sz)*.52});return o}
 const trail=new THREE.Mesh(new THREE.PlaneGeometry(12,260),pathMat);trail.rotation.x=-Math.PI/2;trail.position.y=.015;scene.add(trail);
 const trail2=new THREE.Mesh(new THREE.PlaneGeometry(180,9),pathMat);trail2.rotation.x=-Math.PI/2;trail2.position.y=.02;scene.add(trail2);
@@ -60,7 +60,7 @@ const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState
 function playRakeHurtSound(){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),now=ctx.currentTime;const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(260,now);osc.frequency.exponentialRampToValueAtTime(72,now+.42);filter.type='lowpass';filter.frequency.value=950;gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.22,now+.035);gain.gain.exponentialRampToValueAtTime(.0001,now+.62);osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.65);setTimeout(()=>ctx.close(),900)}catch(e){}}
 function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math.max(0,rakeHP-45);rakeDamageCd=3;rakeHurtUntil=elapsed+1.15;rakeSlowUntil=elapsed+1.8;attackAnimUntil=0;anim(/hurt1|hurt/i);if(action)action.timeScale=1;playRakeHurtSound();notice(source+' hit THE RAKE (-45) · '+rakeHP+' HP');return true}
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
-addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'){navDebug=!navDebug;notice('Navigation ray gizmos '+(navDebug?'ON':'OFF'))}if(e.code==='KeyV'){navDebug=!navDebug;notice('Rake local grid gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}if(e.code==='KeyG'){navDebug=!navDebug;notice('Navigation ray gizmos '+(navDebug?'ON':'OFF'))}if(e.code==='KeyV'){navDebug=!navDebug;notice('Rake polygon navmesh gizmos '+(navDebug?'ON':'OFF'))}});addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('mousedown',e=>{if(e.button===0)playerRakeHit()});
 let navDebugRefresh=0;
 function drawNavDebug(){
@@ -71,14 +71,11 @@ function drawNavDebug(){
  if(elapsed>=navDebugRefresh){
   navDebugSegments=[];
   navDebugRefresh=elapsed+.35;
-  const p=monster?.navActor||controls.getObject().position,base=navCell(p.x,p.z),range=RAKE_LOCAL_RADIUS;
-  const offsets=[[1,0],[0,1],[1,1],[1,-1]];
-  for(let ix=base.x-range;ix<=base.x+range;ix++)for(let iz=base.z-range;iz<=base.z+range;iz++){
-   const a=navCenter(ix,iz);if(blocked(a.x,a.z))continue;
-   for(const [ox,oz] of offsets){const b=navCenter(ix+ox,iz+oz);if(blocked(b.x,b.z))continue;
-    const clear=bridgeClear(a.x,a.z,b.x,b.z);
-    navDebugSegments.push(a.x,.12,a.z,b.x,.12,b.z,clear?0:1);
-   }
+  const actor=monster?.navActor||controls.getObject().position,goal={x:actor.x+0.01,z:actor.z+0.01};
+  const mesh=buildRakePolygonNavmesh(actor,goal);
+  for(const poly of mesh.polygons.values()){
+   for(let i=0;i<4;i++){const a=poly.vertices[i],b=poly.vertices[(i+1)%4];navDebugSegments.push(a.x,.12,a.z,b.x,.12,b.z,0)}
+   for(const edge of poly.portals){navDebugSegments.push(poly.x,.14,poly.z,edge.point.x,.14,edge.point.z,0)}
   }
  }
  for(let i=0;i<navDebugSegments.length;i+=7){
@@ -93,61 +90,89 @@ function drawNavDebug(){
 function notice(t){const n=document.querySelector('#notice');n.textContent=t;n.style.display='block';clearTimeout(notice.timer);notice.timer=setTimeout(()=>n.style.display='none',2500)}
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+0.8)}
 
-// Ray-connected cell graph navigation: each cell raycasts to its 8 neighbors.
-// Homemade ray-connected cell walking: choose a locally reachable adjacent cell by ray-testing bridges; no BFS/A* route.
-let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-// Rake-only local grid: neighboring cell centers connect only when their
-// obstacle-clearance bridge is open. The Rake pursues along this local graph.
+// Custom polygon navmesh: each 3x3 tile is a square polygon. Object bounds
+// carve polygons out first; downward floor raycasts then verify the remaining
+// polygon samples are actually over the walkable ground surface.
+let navDebug=false;const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);let navDebugSegments=[];const NAV_CELL=3,NAV_NEIGHBORS=[[-1,0],[1,0],[0,-1],[0,1]];
 const RAKE_LOCAL_RADIUS=6,RAKE_LOCAL_REFRESH=.32;
-function buildRakeLocalGrid(actor,goal){
- const base=navCell(actor.x,actor.z),nodes=new Map(),key=(x,z)=>x+','+z;
- for(let iz=base.z-RAKE_LOCAL_RADIUS;iz<=base.z+RAKE_LOCAL_RADIUS;iz++)for(let ix=base.x-RAKE_LOCAL_RADIUS;ix<=base.x+RAKE_LOCAL_RADIUS;ix++){
-  const p=navCenter(ix,iz);if(!blocked(p.x,p.z))nodes.set(key(ix,iz),{ix,iz,x:p.x,z:p.z,edges:[]});
+function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
+function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
+function navSurfaceHit(x,z){
+ navSurfaceRaycaster.set(new THREE.Vector3(x,40,z),new THREE.Vector3(0,-1,0));
+ navSurfaceRaycaster.far=80;
+ return navSurfaceRaycaster.intersectObject(ground,false).length>0;
+}
+function polygonOutsideObjectBounds(ix,iz){
+ const minX=ix*NAV_CELL,minZ=iz*NAV_CELL,maxX=minX+NAV_CELL,maxZ=minZ+NAV_CELL;
+ for(const o of obstacles){
+  const qx=THREE.MathUtils.clamp(o.x,minX,maxX),qz=THREE.MathUtils.clamp(o.z,minZ,maxZ);
+  const dx=o.x-qx,dz=o.z-qz;
+  if(dx*dx+dz*dz<(o.r+.8)*(o.r+.8))return false;
  }
- const neighborOffsets=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
- for(const node of nodes.values())for(const [ox,oz] of neighborOffsets){
-  const other=nodes.get(key(node.ix+ox,node.iz+oz));
-  if(other&&bridgeClear(node.x,node.z,other.x,other.z))node.edges.push(other);
+ return true;
+}
+function makeRakePolygon(ix,iz){
+ if(!polygonOutsideObjectBounds(ix,iz))return null;
+ const x=ix*NAV_CELL,z=iz*NAV_CELL,cx=x+NAV_CELL*.5,cz=z+NAV_CELL*.5;
+ const vertices=[{x,z},{x:x+NAV_CELL,z},{x:x+NAV_CELL,z:z+NAV_CELL},{x,z:z+NAV_CELL}];
+ // Center plus all four corners must ray-hit the ground; no polygon is
+ // admitted merely because its center happens to be clear.
+ if(!navSurfaceHit(cx,cz))return null;
+ for(const v of vertices)if(!navSurfaceHit(v.x,v.z))return null;
+ return{ix,iz,x:cx,z:cz,vertices,portals:[]};
+}
+function polygonPortal(a,b){
+ const dx=b.ix-a.ix,dz=b.iz-a.iz;
+ if(Math.abs(dx)+Math.abs(dz)!==1)return null;
+ let x,z;
+ if(dx){x=(dx>0?a.ix+1:a.ix)*NAV_CELL;z=(a.iz+.5)*NAV_CELL}
+ else{x=(a.ix+.5)*NAV_CELL;z=(dz>0?a.iz+1:a.iz)*NAV_CELL}
+ if(blocked(x,z)||!navSurfaceHit(x,z))return null;
+ return{x,z};
+}
+function buildRakePolygonNavmesh(actor,goal){
+ const base=navCell(actor.x,actor.z),polygons=new Map(),key=(x,z)=>x+','+z;
+ for(let iz=base.z-RAKE_LOCAL_RADIUS;iz<=base.z+RAKE_LOCAL_RADIUS;iz++)for(let ix=base.x-RAKE_LOCAL_RADIUS;ix<=base.x+RAKE_LOCAL_RADIUS;ix++){
+  const poly=makeRakePolygon(ix,iz);if(poly)polygons.set(key(ix,iz),poly);
+ }
+ for(const poly of polygons.values())for(const [ox,oz] of NAV_NEIGHBORS){
+  const other=polygons.get(key(poly.ix+ox,poly.iz+oz));if(!other)continue;
+  const portal=polygonPortal(poly,other);if(portal)poly.portals.push({to:other,point:portal});
  }
  let start=null,startDistance=Infinity;
- for(const node of nodes.values()){
-  const d=Math.hypot(node.x-actor.x,node.z-actor.z);
-  if(d<startDistance&&d<NAV_CELL*1.8&&bridgeClear(actor.x,actor.z,node.x,node.z)){start=node;startDistance=d}
+ for(const poly of polygons.values()){
+  const d=Math.hypot(poly.x-actor.x,poly.z-actor.z);
+  if(d<startDistance&&d<NAV_CELL*1.8&&navSurfaceHit(actor.x,actor.z)&&bridgeClear(actor.x,actor.z,poly.x,poly.z)){start=poly;startDistance=d}
  }
- if(!start)return{nodes,edges:[],path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
- const queue=[start],parent=new Map([[key(start.ix,start.iz),null]]),edges=[];
- for(let i=0;i<queue.length;i++){
-  const node=queue[i];
-  for(const other of node.edges){
-   edges.push([node,other]);const k=key(other.ix,other.iz);
-   if(parent.has(k))continue;parent.set(k,node);queue.push(other);
-  }
+ if(!start)return{polygons,path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ const queue=[start],parent=new Map([[key(start.ix,start.iz),null]]);
+ for(let i=0;i<queue.length;i++)for(const edge of queue[i].portals){
+  const other=edge.to,k=key(other.ix,other.iz);if(parent.has(k))continue;
+  parent.set(k,{from:queue[i],portal:edge.point});queue.push(other);
  }
  let best=start,bestScore=Math.hypot(goal.x-start.x,goal.z-start.z);
- for(const node of queue){const score=Math.hypot(goal.x-node.x,goal.z-node.z);if(score<bestScore){best=node;bestScore=score}}
+ for(const poly of queue){const score=Math.hypot(goal.x-poly.x,goal.z-poly.z);if(score<bestScore){best=poly;bestScore=score}}
  const path=[];let cursor=best;
- while(cursor&&cursor!==start){path.push({x:cursor.x,z:cursor.z});cursor=parent.get(key(cursor.ix,cursor.iz))}
+ while(cursor!==start){const link=parent.get(key(cursor.ix,cursor.iz));if(!link)break;path.push(link.portal);cursor=link.from}
  path.reverse();
- return{nodes,edges,path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
+ if(path.length&&bridgeClear(actor.x,actor.z,path[0].x,path[0].z)===false)path.shift();
+ return{polygons,path,next:path[0]||null,builtAt:elapsed,target:{x:goal.x,z:goal.z}};
 }
 function rakeLocalGridMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
- let grid=actor.rakeLocalGrid;
- if(!grid||elapsed-grid.builtAt>=RAKE_LOCAL_REFRESH||
-    Math.hypot(goal.x-grid.target.x,goal.z-grid.target.z)>1.25||
-    !grid.next||Math.hypot(actor.x-grid.next.x,actor.z-grid.next.z)<.42){
-  grid=buildRakeLocalGrid(actor,goal);actor.rakeLocalGrid=grid;
+ let mesh=actor.rakePolygonNavmesh;
+ if(!mesh||elapsed-mesh.builtAt>=RAKE_LOCAL_REFRESH||
+    Math.hypot(goal.x-mesh.target.x,goal.z-mesh.target.z)>1.25||
+    !mesh.next||Math.hypot(actor.x-mesh.next.x,actor.z-mesh.next.z)<.42){
+  mesh=buildRakePolygonNavmesh(actor,goal);actor.rakePolygonNavmesh=mesh;
  }
- const waypoint=grid.next;if(!waypoint)return;
+ const waypoint=mesh.next;if(!waypoint)return;
  const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,d=Math.hypot(dx,dz);
  if(d<.02)return;
  const step=Math.min(Math.max(0,speed*dt),d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;
- if(!bridgeClear(actor.x,actor.z,nx,nz)){actor.rakeLocalGrid=null;return}
+ if(!bridgeClear(actor.x,actor.z,nx,nz)||!navSurfaceHit(nx,nz)){actor.rakePolygonNavmesh=null;return}
  actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz);
 }
-function bridgeClear(ax,az,bx,bz){const n=Math.max(2,Math.ceil(Math.hypot(bx-ax,bz-az)/.35));for(let i=1;i<=n;i++){const t=i/n;if(blocked(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true}
-function navCell(x,z){return{x:Math.floor(x/NAV_CELL),z:Math.floor(z/NAV_CELL)}}
-function navCenter(ix,iz){return{x:ix*NAV_CELL+NAV_CELL*.5,z:iz*NAV_CELL+NAV_CELL*.5}}
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
 updateChunks();
