@@ -90,16 +90,16 @@ function buildGlobalPolygonDebug(){
    }
   }
  }
- // Only two triangles with the exact same full edge may connect.
- // Test the entire shared edge and the centroid-to-centroid bridge so links
- // cannot pass through carved objects, gaps, or non-walkable ground.
+ // Connect triangles that share an actual full edge. Validate the shared
+ // boundary itself, but do not reject the connection because a straight
+ // centroid-to-centroid ray clips a nearby carved obstacle: the shared edge
+ // is the topological connection and movement is validated separately.
  for(const pair of edges.values())if(pair.length===2){
   const [a,b]=pair,m={x:(a.a.x+a.b.x)*.5,z:(a.a.z+a.b.z)*.5};
   const q1={x:a.a.x*.75+a.b.x*.25,z:a.a.z*.75+a.b.z*.25};
   const q3={x:a.a.x*.25+a.b.x*.75,z:a.a.z*.25+a.b.z*.75};
   if(!navSurfaceHit(m.x,m.z)||!navSurfaceHit(q1.x,q1.z)||!navSurfaceHit(q3.x,q3.z))continue;
-  if(!bridgeClear(a.poly.x,a.poly.z,b.poly.x,b.poly.z))continue;
-  if(blocked(m.x,m.z))continue;
+  if(blocked(m.x,m.z)||blocked(q1.x,q1.z)||blocked(q3.x,q3.z))continue;
   a.poly.portals.push({to:b.poly,point:m});b.poly.portals.push({to:a.poly,point:m});
  }
  globalPolygonDebugCache=polygons;return polygons;
@@ -111,7 +111,7 @@ function drawNavDebug(){
   const [a,b,c]=poly.vertices;
   facePositions.push(a.x,.105,a.z,b.x,.105,b.z,c.x,.105,c.z);
   for(let i=0;i<3;i++){const p=poly.vertices[i],q=poly.vertices[(i+1)%3];edgePositions.push(p.x,.14,p.z,q.x,.14,q.z)}
-  for(const edge of poly.portals)portalPositions.push(poly.x,.19,poly.z,edge.point.x,.19,edge.point.z);
+  for(const edge of poly.portals)portalPositions.push(poly.x,.19,poly.z,edge.to.x,.19,edge.to.z);
  }
  if(facePositions.length){
   const fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.Float32BufferAttribute(facePositions,3));
@@ -191,7 +191,6 @@ function buildRakePolygonNavmesh(actor,goal){
  // walkable triangle in the same global mesh.
  for(let i=0;i<queue.length;i++)for(const edge of queue[i].portals){
   const next=edge.to,k=id(next);if(parent.has(k))continue;
-  if(!bridgeClear(queue[i].x,queue[i].z,next.x,next.z))continue;
   parent.set(k,queue[i]);queue.push(next);
  }
  // Prefer a triangle that directly reaches the goal; otherwise use the
