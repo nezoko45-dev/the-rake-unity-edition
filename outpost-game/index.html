@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE RAKE: FOREST FREEPLAY</title>
 <style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#080b10;color:#e8edf2;font:14px system-ui}canvas{display:block}#hud,#help,#notice{position:fixed;background:#071019d9;border:1px solid #52708066;border-radius:9px;padding:12px;z-index:2}#hud{top:14px;left:14px;min-width:210px}#help{bottom:14px;left:14px;color:#bac8d2;line-height:1.6}#notice{top:18%;left:50%;transform:translateX(-50%);display:none;color:#ffd5a0}#cross{position:fixed;left:50%;top:50%;width:7px;height:7px;border:1px solid white;border-radius:50%}#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#020509df;z-index:5;text-align:center}#panel{max-width:500px;padding:30px}button{padding:12px 20px;border:0;border-radius:6px;background:#d8a25e;font-weight:800;cursor:pointer}.debug-toggle{margin-top:9px;padding:6px 9px;border:1px solid #668397;border-radius:5px;background:#172633;color:#dceaf2;font-size:11px;font-weight:800;letter-spacing:.04em}.debug-toggle.active{background:#24533a;border-color:#68d99a;color:#baffd1}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script></head><body>
-<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-avoidance-toggle" class="debug-toggle" type="button">RAKE AVOIDANCE RAYS: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
+<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click mouse lock<br>Freeplay · Explore the forest</div><div id="cross"></div><div id="notice"></div>
 <div id="overlay"><div id="panel"><h1>THE RAKE: FOREST FREEPLAY</h1><p>No objectives. No missions. Just freeplay—explore while the hunter roams and reacts to you.</p><p><small>Same Rake model and soundtrack assets; new map and AI behavior.</small></p><button id="start">ENTER THE FOREST</button></div></div>
 <script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
@@ -258,13 +258,11 @@ const RAKE_AVOIDANCE_RAY_COUNT=16,RAKE_AVOIDANCE_RANGE=3.8,RAKE_AVOIDANCE_REFRES
 const RAKE_AVOIDANCE_HEIGHTS=[1.05,2.05];
 const rakeAvoidanceGroup=new THREE.Group();scene.add(rakeAvoidanceGroup);
 let rakeAvoidanceDebugOn=false,rakeAvoidanceDrawAt=0;
-const rakeAvoidanceButton=document.querySelector('#rake-avoidance-toggle');
-rakeAvoidanceButton.addEventListener('click',()=>{
+addEventListener('keydown',e=>{
+ if(e.code!=='KeyG'||e.repeat)return;
  rakeAvoidanceDebugOn=!rakeAvoidanceDebugOn;
- rakeAvoidanceButton.textContent='RAKE AVOIDANCE RAYS: '+(rakeAvoidanceDebugOn?'ON':'OFF');
- rakeAvoidanceButton.classList.toggle('active',rakeAvoidanceDebugOn);
  if(!rakeAvoidanceDebugOn)clearRakeAvoidanceGizmos();else rakeAvoidanceDrawAt=0;
- notice('Rake object-bound sampling '+(rakeAvoidanceDebugOn?'ON':'OFF'));
+ notice('Rake score gizmos '+(rakeAvoidanceDebugOn?'ON':'OFF'));
 });
 function clearRakeAvoidanceGizmos(){
  for(const child of rakeAvoidanceGroup.children){child.geometry?.dispose();child.material?.dispose()}
@@ -314,18 +312,27 @@ function drawRakeAvoidanceGizmos(){
  if(elapsed<rakeAvoidanceDrawAt)return;
  rakeAvoidanceDrawAt=elapsed+.12;
  clearRakeAvoidanceGizmos();
- const data=sampleRakeObjectBounds(monster.navActor),positions=[],colors=[];
- for(const sample of data.samples){
-  const end=sample.hitPoint||sample.origin.clone().addScaledVector(sample.direction,RAKE_AVOIDANCE_RANGE);
-  positions.push(sample.origin.x,sample.origin.y,sample.origin.z,end.x,end.y,end.z);
-  const c=sample.clear?new THREE.Color(0x35f27b):new THREE.Color(0xff3b35);
-  colors.push(c.r,c.g,c.b,c.r,c.g,c.b);
+ const actor=monster.navActor,scores=actor.rakeDirectionScores;
+ if(!scores?.length)return;
+ const positions=[],colors=[];
+ let best=-Infinity;
+ for(const item of scores)if(item.walkable&&Number.isFinite(item.score))best=Math.max(best,item.score);
+ for(const item of scores){
+  const dx=Math.sin(item.angle),dz=Math.cos(item.angle);
+  const isBest=item.walkable&&Math.abs(item.score-best)<.0001;
+  // Walkable directions scale with their score; terminated candidates remain
+  // short and red so the eliminated choices are easy to distinguish.
+  const length=item.walkable?1.0+THREE.MathUtils.clamp((item.score+2)/8,0,1)*2.1:.42;
+  const y=.16+(isBest?.12:0);
+  positions.push(actor.x,y,actor.z,actor.x+dx*length,y,actor.z+dz*length);
+  const color=isBest?new THREE.Color(0xffd34e):item.walkable?new THREE.Color(0x35e889):new THREE.Color(0xff4545);
+  colors.push(color.r,color.g,color.b,color.r,color.g,color.b);
  }
  if(positions.length){
   const geometry=new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  rakeAvoidanceGroup.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({vertexColors:true,depthTest:false,transparent:true,opacity:.95})));
+  rakeAvoidanceGroup.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({vertexColors:true,depthTest:false,transparent:true,opacity:.98})));
  }
 }
 function polygonGlobalMove(actor,goal,dt,speed){
