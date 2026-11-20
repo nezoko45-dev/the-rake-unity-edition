@@ -307,32 +307,50 @@ function rakeAvoidancePenalty(actor,candidate){
  if(nearestHit>distance+.7)return 0;
  return 3.2*(1-nearestHit/(distance+.7));
 }
+let globalGroundScoreSignature='',globalGroundScoreDrawnAt=0;
 function drawRakeAvoidanceGizmos(){
- if(!rakeAvoidanceDebugOn||!monster?.navActor){if(!rakeAvoidanceDebugOn)clearRakeAvoidanceGizmos();return}
- if(elapsed<rakeAvoidanceDrawAt)return;
- rakeAvoidanceDrawAt=elapsed+.12;
+ if(!rakeAvoidanceDebugOn){if(rakeAvoidanceGroup.children.length)clearRakeAvoidanceGizmos();return}
+ if(elapsed<globalGroundScoreDrawnAt)return;
+ globalGroundScoreDrawnAt=elapsed+.5;
+ const signature=[...chunkMap.keys()].sort().join('|')+':'+obstacles.length;
+ if(signature===globalGroundScoreSignature&&rakeAvoidanceGroup.children.length)return;
+ globalGroundScoreSignature=signature;
  clearRakeAvoidanceGizmos();
- const actor=monster.navActor,scores=actor.rakeDirectionScores;
- if(!scores?.length)return;
- const positions=[],colors=[];
- let best=-Infinity;
- for(const item of scores)if(item.walkable&&Number.isFinite(item.score))best=Math.max(best,item.score);
- for(const item of scores){
-  const dx=Math.sin(item.angle),dz=Math.cos(item.angle);
-  const isBest=item.walkable&&Math.abs(item.score-best)<.0001;
-  // Walkable directions scale with their score; terminated candidates remain
-  // short and red so the eliminated choices are easy to distinguish.
-  const length=item.walkable?1.0+THREE.MathUtils.clamp((item.score+2)/8,0,1)*2.1:.42;
-  const y=.16+(isBest?.12:0);
-  positions.push(actor.x,y,actor.z,actor.x+dx*length,y,actor.z+dz*length);
-  const color=isBest?new THREE.Color(0xffd34e):item.walkable?new THREE.Color(0x35e889):new THREE.Color(0xff4545);
-  colors.push(color.r,color.g,color.b,color.r,color.g,color.b);
+ const cell=1.5,half=cell*.5,positions=[],colors=[];
+ const addQuad=(x,z,score)=>{
+  const y=.095,red=score<0;
+  const c=red?new THREE.Color(0xff3939):new THREE.Color().setHSL(.34,.82,.32+Math.min(score,5)*.025);
+  const x0=x-half*.92,x1=x+half*.92,z0=z-half*.92,z1=z+half*.92;
+  positions.push(x0,y,z0,x1,y,z0,x1,y,z1,x0,y,z0,x1,y,z1,x0,y,z1);
+  for(let i=0;i<6;i++)colors.push(c.r,c.g,c.b);
+ };
+ // Score every ground tile across every currently loaded chunk. A tile is
+ // terminated if its footprint overlaps any expanded obstacle object bound.
+ for(const chunk of chunkMap.values()){
+  const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
+  const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
+  const minIx=Math.floor(minX/cell),maxIx=Math.ceil(maxX/cell);
+  const minIz=Math.floor(minZ/cell),maxIz=Math.ceil(maxZ/cell);
+  for(let iz=minIz;iz<maxIz;iz++)for(let ix=minIx;ix<maxIx;ix++){
+   const x=(ix+.5)*cell,z=(iz+.5)*cell;
+   if(x<minX||x>=maxX||z<minZ||z>=maxZ)continue;
+   let score=Infinity;
+   for(const o of obstacles){
+    const qx=THREE.MathUtils.clamp(o.x,x-half,x+half);
+    const qz=THREE.MathUtils.clamp(o.z,z-half,z+half);
+    const clearance=Math.hypot(o.x-qx,o.z-qz)-(o.r+.8);
+    score=Math.min(score,clearance);
+   }
+   if(!Number.isFinite(score))score=5;
+   addQuad(x,z,score);
+  }
  }
  if(positions.length){
   const geometry=new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  rakeAvoidanceGroup.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({vertexColors:true,depthTest:false,transparent:true,opacity:.98})));
+  geometry.computeBoundingSphere();
+  rakeAvoidanceGroup.add(new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,depthTest:false,transparent:true,opacity:.72})));
  }
 }
 function polygonGlobalMove(actor,goal,dt,speed){
