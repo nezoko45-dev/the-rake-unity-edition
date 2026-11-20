@@ -281,13 +281,14 @@ function rakeAvoidancePenalty(actor,candidate){
  if(distance<.01)return 0;
  const angle=Math.atan2(dx,dz);
  const data=sampleRakeObjectBounds(actor);
- let nearest=null,angleDiff=Infinity;
+ let angleDiff=Infinity,nearestHit=RAKE_AVOIDANCE_RANGE;
  for(const sample of data.samples){
   const diff=Math.abs(Math.atan2(Math.sin(sample.angle-angle),Math.cos(sample.angle-angle)));
-  if(diff<angleDiff){nearest=sample;angleDiff=diff}
+  if(diff<angleDiff-.0001){angleDiff=diff;nearestHit=sample.hitDistance}
+  else if(Math.abs(diff-angleDiff)<.0001)nearestHit=Math.min(nearestHit,sample.hitDistance);
  }
- if(!nearest||nearest.clear||nearest.hitDistance>distance+.7)return 0;
- return 3.2*(1-nearest.hitDistance/(distance+.7));
+ if(nearestHit>distance+.7)return 0;
+ return 3.2*(1-nearestHit/(distance+.7));
 }
 function drawRakeAvoidanceGizmos(){
  if(!rakeAvoidanceDebugOn||!monster?.navActor){if(!rakeAvoidanceDebugOn)clearRakeAvoidanceGizmos();return}
