@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>THE RAKE: FOREST FREEPLAY</title>
 <style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#080b10;color:#e8edf2;font:14px system-ui}canvas{display:block}#hud,#help,#notice{position:fixed;background:#071019d9;border:1px solid #52708066;border-radius:9px;padding:12px;z-index:2}#hud{top:14px;left:14px;min-width:210px}#help{bottom:14px;left:14px;color:#bac8d2;line-height:1.6}#notice{top:18%;left:50%;transform:translateX(-50%);display:none;color:#ffd5a0}#cross{position:fixed;left:50%;top:50%;width:7px;height:7px;border:1px solid white;border-radius:50%}#overlay{position:fixed;inset:0;display:grid;place-items:center;background:#020509df;z-index:5;text-align:center}#panel{max-width:500px;padding:30px}button{padding:12px 20px;border:0;border-radius:6px;background:#d8a25e;font-weight:800;cursor:pointer}.debug-toggle{margin-top:9px;padding:6px 9px;border:1px solid #668397;border-radius:5px;background:#172633;color:#dceaf2;font-size:11px;font-weight:800;letter-spacing:.04em}.debug-toggle.active{background:#24533a;border-color:#68d99a;color:#baffd1}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script></head><body>
-<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE POLYGON NAVMESH: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
+<div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><button id="rake-vector-toggle" class="debug-toggle" type="button">RAKE POLYGON NAVMESH: OFF</button><button id="rake-avoidance-toggle" class="debug-toggle" type="button">RAKE AVOIDANCE RAYS: OFF</button><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click mouse lock<br>Freeplay · Explore the forest</div><div id="cross"></div><div id="notice"></div>
 <div id="overlay"><div id="panel"><h1>THE RAKE: FOREST FREEPLAY</h1><p>No objectives. No missions. Just freeplay—explore while the hunter roams and reacts to you.</p><p><small>Same Rake model and soundtrack assets; new map and AI behavior.</small></p><button id="start">ENTER THE FOREST</button></div></div>
 <script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
@@ -222,9 +222,10 @@ function buildRakePolygonNavmesh(actor,goal){
   if(!bridgeClear(current.x,current.z,candidate.x,candidate.z)||!rakeObjectBoundsClear(current.x,current.z,candidate.x,candidate.z))continue;
   const remaining=Math.hypot(goal.x-candidate.x,goal.z-candidate.z);
   const hop=Math.hypot(candidate.x-current.x,candidate.z-current.z);
-  // Pick only an edge-connected neighboring triangle. Target coordinates
-  // influence which neighbor is chosen, never become a movement waypoint.
-  const score=remaining+hop*.04;
+  // Radial object-bound samples bias the choice toward the clearest adjacent
+  // triangle. The target still only ranks neighbors; it is never a waypoint.
+  const avoidance=rakeAvoidancePenalty(actor,candidate);
+  const score=remaining+hop*.04+avoidance;
   if(score<bestScore){best=candidate;bestScore=score}
  }
  if(!best)return{path:[],next:null,builtAt:elapsed,target:{x:goal.x,z:goal.z},current};
@@ -232,25 +233,80 @@ function buildRakePolygonNavmesh(actor,goal){
  return{path:[waypoint],next:waypoint,builtAt:elapsed,target:{x:goal.x,z:goal.z},current};
 }
 const rakeBoundsRaycaster=new THREE.Raycaster();
+const rakeAvoidanceRaycaster=new THREE.Raycaster();
 const RAKE_BOUNDS_HEIGHTS=[.55,1.15,1.85,2.55];
-function rakeObjectBoundsClear(ax,az,bx,bz){
- const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz);
- if(length<.025)return true;
- const nearby=[];
- for(const o of obstacles){
-  const t=THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/(length*length),0,1);
-  const px=ax+dx*t,pz=az+dz*t;
-  if(Math.hypot(o.x-px,o.z-pz)<o.r+1.8&&o.meshes)nearby.push(...o.meshes);
+const RAKE_AVOIDANCE_RAY_COUNT=16,RAKE_AVOIDANCE_RANGE=3.8,RAKE_AVOIDANCE_REFRESH=.14;
+const RAKE_AVOIDANCE_HEIGHTS=[1.05,2.05];
+const rakeAvoidanceGroup=new THREE.Group();scene.add(rakeAvoidanceGroup);
+let rakeAvoidanceDebugOn=false,rakeAvoidanceDrawAt=0;
+const rakeAvoidanceButton=document.querySelector('#rake-avoidance-toggle');
+rakeAvoidanceButton.addEventListener('click',()=>{
+ rakeAvoidanceDebugOn=!rakeAvoidanceDebugOn;
+ rakeAvoidanceButton.textContent='RAKE AVOIDANCE RAYS: '+(rakeAvoidanceDebugOn?'ON':'OFF');
+ rakeAvoidanceButton.classList.toggle('active',rakeAvoidanceDebugOn);
+ if(!rakeAvoidanceDebugOn)clearRakeAvoidanceGizmos();else rakeAvoidanceDrawAt=0;
+ notice('Rake object-bound sampling '+(rakeAvoidanceDebugOn?'ON':'OFF'));
+});
+function clearRakeAvoidanceGizmos(){
+ for(const child of rakeAvoidanceGroup.children){child.geometry?.dispose();child.material?.dispose()}
+ rakeAvoidanceGroup.clear();
+}
+function rakeNearbyBoundMeshes(x,z,radius){
+ const meshes=[];
+ for(const o of obstacles)if(o.meshes&&Math.hypot(o.x-x,o.z-z)<radius+o.r)meshes.push(...o.meshes);
+ return meshes;
+}
+function sampleRakeObjectBounds(actor){
+ const cached=actor.rakeAvoidanceSamples;
+ if(cached&&elapsed-cached.sampledAt<RAKE_AVOIDANCE_REFRESH)return cached;
+ const nearby=rakeNearbyBoundMeshes(actor.x,actor.z,RAKE_AVOIDANCE_RANGE);
+ const samples=[];
+ for(let i=0;i<RAKE_AVOIDANCE_RAY_COUNT;i++){
+  const angle=i/RAKE_AVOIDANCE_RAY_COUNT*Math.PI*2;
+  const direction=new THREE.Vector3(Math.sin(angle),0,Math.cos(angle));
+  for(const height of RAKE_AVOIDANCE_HEIGHTS){
+   const origin=new THREE.Vector3(actor.x,height,actor.z);
+   rakeAvoidanceRaycaster.set(origin,direction);
+   rakeAvoidanceRaycaster.near=.06;
+   rakeAvoidanceRaycaster.far=RAKE_AVOIDANCE_RANGE;
+   const hit=nearby.length?rakeAvoidanceRaycaster.intersectObjects(nearby,false)[0]:null;
+   samples.push({angle,height,origin,direction,clear:!hit,hitDistance:hit?hit.distance:RAKE_AVOIDANCE_RANGE,hitPoint:hit?.point||null});
+  }
  }
- if(!nearby.length)return true;
- const direction=new THREE.Vector3(dx/length,0,dz/length);
- for(const height of RAKE_BOUNDS_HEIGHTS){
-  rakeBoundsRaycaster.set(new THREE.Vector3(ax,height,az),direction);
-  rakeBoundsRaycaster.near=.08;
-  rakeBoundsRaycaster.far=length+1.15;
-  if(rakeBoundsRaycaster.intersectObjects(nearby,false).length)return false;
+ actor.rakeAvoidanceSamples={sampledAt:elapsed,x:actor.x,z:actor.z,samples};
+ return actor.rakeAvoidanceSamples;
+}
+function rakeAvoidancePenalty(actor,candidate){
+ const dx=candidate.x-actor.x,dz=candidate.z-actor.z,distance=Math.hypot(dx,dz);
+ if(distance<.01)return 0;
+ const angle=Math.atan2(dx,dz);
+ const data=sampleRakeObjectBounds(actor);
+ let nearest=null,angleDiff=Infinity;
+ for(const sample of data.samples){
+  const diff=Math.abs(Math.atan2(Math.sin(sample.angle-angle),Math.cos(sample.angle-angle)));
+  if(diff<angleDiff){nearest=sample;angleDiff=diff}
  }
- return true;
+ if(!nearest||nearest.clear||nearest.hitDistance>distance+.7)return 0;
+ return 3.2*(1-nearest.hitDistance/(distance+.7));
+}
+function drawRakeAvoidanceGizmos(){
+ if(!rakeAvoidanceDebugOn||!monster?.navActor){if(!rakeAvoidanceDebugOn)clearRakeAvoidanceGizmos();return}
+ if(elapsed<rakeAvoidanceDrawAt)return;
+ rakeAvoidanceDrawAt=elapsed+.12;
+ clearRakeAvoidanceGizmos();
+ const data=sampleRakeObjectBounds(monster.navActor),positions=[],colors=[];
+ for(const sample of data.samples){
+  const end=sample.hitPoint||sample.origin.clone().addScaledVector(sample.direction,RAKE_AVOIDANCE_RANGE);
+  positions.push(sample.origin.x,sample.origin.y,sample.origin.z,end.x,end.y,end.z);
+  const c=sample.clear?new THREE.Color(0x35f27b):new THREE.Color(0xff3b35);
+  colors.push(c.r,c.g,c.b,c.r,c.g,c.b);
+ }
+ if(positions.length){
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+  rakeAvoidanceGroup.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({vertexColors:true,depthTest:false,transparent:true,opacity:.95})));
+ }
 }
 function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z))return;
@@ -453,7 +509,7 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();drawRakeParticleGizmos();
+  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();drawRakeParticleGizmos();drawRakeAvoidanceGizmos();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';
   document.querySelector('#bar').style.width=player.hp+'%';
