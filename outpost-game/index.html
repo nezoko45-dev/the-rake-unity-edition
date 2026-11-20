@@ -308,24 +308,27 @@ function rakeAvoidancePenalty(actor,candidate){
  return 3.2*(1-nearestHit/(distance+.7));
 }
 let globalGroundScoreSignature='',globalGroundScoreDrawnAt=0;
-function drawRakeAvoidanceGizmos(){
- if(!rakeAvoidanceDebugOn){if(rakeAvoidanceGroup.children.length)clearRakeAvoidanceGizmos();return}
- if(elapsed<globalGroundScoreDrawnAt)return;
- globalGroundScoreDrawnAt=elapsed+.5;
+const GLOBAL_GROUND_SCORE_CELL=1.5;
+let globalGroundScoreSignature='',globalGroundScoreMap=new Map(),globalGroundScoreDrawnAt=0;
+function globalGroundScoreKey(ix,iz){return ix+','+iz}
+function globalGroundScoreAt(ix,iz){return globalGroundScoreMap.get(globalGroundScoreKey(ix,iz))||null}
+function globalGroundTileClearance(x,z){
+ const half=GLOBAL_GROUND_SCORE_CELL*.5;
+ let score=Infinity;
+ for(const o of obstacles){
+  const qx=THREE.MathUtils.clamp(o.x,x-half,x+half);
+  const qz=THREE.MathUtils.clamp(o.z,z-half,z+half);
+  const clearance=Math.hypot(o.x-qx,o.z-qz)-(o.r+.8);
+  score=Math.min(score,clearance);
+ }
+ return Number.isFinite(score)?score:5;
+}
+function buildGlobalGroundScores(){
  const signature=[...chunkMap.keys()].sort().join('|')+':'+obstacles.length;
- if(signature===globalGroundScoreSignature&&rakeAvoidanceGroup.children.length)return;
+ if(signature===globalGroundScoreSignature&&globalGroundScoreMap.size)return globalGroundScoreMap;
  globalGroundScoreSignature=signature;
- clearRakeAvoidanceGizmos();
- const cell=1.5,half=cell*.5,positions=[],colors=[];
- const addQuad=(x,z,score)=>{
-  const y=.095,red=score<0;
-  const c=red?new THREE.Color(0xff3939):new THREE.Color().setHSL(.34,.82,.32+Math.min(score,5)*.025);
-  const x0=x-half*.92,x1=x+half*.92,z0=z-half*.92,z1=z+half*.92;
-  positions.push(x0,y,z0,x1,y,z0,x1,y,z1,x0,y,z0,x1,y,z1,x0,y,z1);
-  for(let i=0;i<6;i++)colors.push(c.r,c.g,c.b);
- };
- // Score every ground tile across every currently loaded chunk. A tile is
- // terminated if its footprint overlaps any expanded obstacle object bound.
+ globalGroundScoreMap=new Map();
+ const cell=GLOBAL_GROUND_SCORE_CELL;
  for(const chunk of chunkMap.values()){
   const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
   const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
@@ -334,16 +337,24 @@ function drawRakeAvoidanceGizmos(){
   for(let iz=minIz;iz<maxIz;iz++)for(let ix=minIx;ix<maxIx;ix++){
    const x=(ix+.5)*cell,z=(iz+.5)*cell;
    if(x<minX||x>=maxX||z<minZ||z>=maxZ)continue;
-   let score=Infinity;
-   for(const o of obstacles){
-    const qx=THREE.MathUtils.clamp(o.x,x-half,x+half);
-    const qz=THREE.MathUtils.clamp(o.z,z-half,z+half);
-    const clearance=Math.hypot(o.x-qx,o.z-qz)-(o.r+.8);
-    score=Math.min(score,clearance);
-   }
-   if(!Number.isFinite(score))score=5;
-   addQuad(x,z,score);
+   const score=globalGroundTileClearance(x,z);
+   globalGroundScoreMap.set(globalGroundScoreKey(ix,iz),{ix,iz,x,z,score,walkable:score>=.08});
   }
+ }
+ return globalGroundScoreMap;
+}
+function drawRakeAvoidanceGizmos(){
+ if(!rakeAvoidanceDebugOn){if(rakeAvoidanceGroup.children.length)clearRakeAvoidanceGizmos();return}
+ if(elapsed<globalGroundScoreDrawnAt)return;
+ globalGroundScoreDrawnAt=elapsed+.5;
+ const scores=buildGlobalGroundScores();
+ clearRakeAvoidanceGizmos();
+ const half=GLOBAL_GROUND_SCORE_CELL*.46,positions=[],colors=[];
+ for(const tile of scores.values()){
+  const c=tile.walkable?new THREE.Color().setHSL(.34,.82,.32+Math.min(tile.score,5)*.025):new THREE.Color(0xff3939);
+  const x0=tile.x-half,x1=tile.x+half,z0=tile.z-half,z1=tile.z+half,y=.095;
+  positions.push(x0,y,z0,x1,y,z0,x1,y,z1,x0,y,z0,x1,y,z1,x0,y,z1);
+  for(let i=0;i<6;i++)colors.push(c.r,c.g,c.b);
  }
  if(positions.length){
   const geometry=new THREE.BufferGeometry();
@@ -355,47 +366,58 @@ function drawRakeAvoidanceGizmos(){
 }
 function polygonGlobalMove(actor,goal,dt,speed){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
- const gx=goal.x-actor.x,gz=goal.z-actor.z,goalDistance=Math.hypot(gx,gz);
- if(goalDistance<.12){actor.rakeBoundaryFollow=null;return}
- const count=RAKE_AVOIDANCE_RAY_COUNT;
- const desired=Math.atan2(gx,gz),wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
- let follow=actor.rakeBoundaryFollow;
- // Score directions using obstacle bounds only: no raycasts or mesh queries.
- const requestedStep=Math.min(speed*dt,goalDistance),scoredDirections=[];
- let best=null,bestScore=-Infinity;
- if(follow){
-  const tangent=wrap(follow.wallAngle+follow.side*Math.PI*.5);
-  const outward=wrap(follow.wallAngle+Math.PI);
-  var steeringAngle=wrap(tangent+wrap(outward-tangent)*.16);
- }else var steeringAngle=desired;
- for(let i=0;i<count;i++){
-  const angle=i/count*Math.PI*2,dx=Math.sin(angle),dz=Math.cos(angle);
-  const nx=actor.x+dx*requestedStep,nz=actor.z+dz*requestedStep;
-  let walkable=true,clearance=Infinity;
-  // Treat each obstacle's object bound as an expanded circle. A direction
-  // is terminated if its complete movement segment overlaps any bound.
+ const goalDistance=Math.hypot(goal.x-actor.x,goal.z-actor.z);
+ if(goalDistance<.12){actor.rakeGroundWaypoint=null;actor.rakeGroundVisited=[];return}
+ const scores=buildGlobalGroundScores(),cell=GLOBAL_GROUND_SCORE_CELL;
+ const wrapCell=(x,z)=>({ix:Math.floor(x/cell),iz:Math.floor(z/cell)});
+ const segmentClear=(ax,az,bx,bz)=>{
+  const dx=bx-ax,dz=bz-az,lenSq=dx*dx+dz*dz;
   for(const o of obstacles){
-   const ox=o.x-actor.x,oz=o.z-actor.z;
-   const t=THREE.MathUtils.clamp((ox*dx+oz*dz)/Math.max(.0001,requestedStep),0,requestedStep);
-   const nearestX=actor.x+dx*t,nearestZ=actor.z+dz*t;
-   const surfaceDistance=Math.hypot(nearestX-o.x,nearestZ-o.z)-(o.r+.8);
-   clearance=Math.min(clearance,surfaceDistance);
-   if(surfaceDistance<.08){walkable=false;break}
+   const t=lenSq>1e-8?THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/lenSq,0,1):0;
+   const px=ax+dx*t,pz=az+dz*t;
+   if(Math.hypot(px-o.x,pz-o.z)<o.r+.88)return false;
   }
-  if(!walkable){scoredDirections.push({angle,score:-Infinity,walkable:false});continue}
-  const alignment=Math.cos(angle-steeringAngle);
-  const targetProgress=Math.cos(angle-desired);
-  const turn=actor.rakeSteerAngle==null?0:Math.abs(wrap(angle-actor.rakeSteerAngle));
-  const obstacleClearance=Number.isFinite(clearance)?Math.min(clearance,RAKE_AVOIDANCE_RANGE):RAKE_AVOIDANCE_RANGE;
-  const score=alignment*(follow?5.2:4.4)+targetProgress*(follow?.65:1.1)+obstacleClearance*.16-turn*.12;
-  scoredDirections.push({angle,score,walkable:true,clearance:obstacleClearance,travel:requestedStep});
-  if(score>bestScore){bestScore=score;best={angle,travel:requestedStep}}
+  return true;
+ };
+ const here=wrapCell(actor.x,actor.z),hereKey=globalGroundScoreKey(here.ix,here.iz);
+ let visited=actor.rakeGroundVisited;
+ if(!Array.isArray(visited)||actor.rakeGroundGoalKey!==globalGroundScoreKey(Math.floor(goal.x/6),Math.floor(goal.z/6))){
+  visited=[];actor.rakeGroundVisited=visited;actor.rakeGroundGoalKey=globalGroundScoreKey(Math.floor(goal.x/6),Math.floor(goal.z/6));actor.rakeGroundWaypoint=null;
  }
- actor.rakeDirectionScores=scoredDirections;
- if(!best)return;
- actor.rakeSteerAngle=best.angle;
- const nx=actor.x+Math.sin(best.angle)*best.travel,nz=actor.z+Math.cos(best.angle)*best.travel;
- actor.x=nx;actor.z=nz;actor.yaw=best.angle;
+ if(visited[visited.length-1]!==hereKey){visited.push(hereKey);if(visited.length>32)visited.shift()}
+ // Keep the selected global ground tile until reached; do not re-pick a
+ // direction every frame, which would cause jitter at tile boundaries.
+ let waypoint=actor.rakeGroundWaypoint;
+ if(waypoint){
+  const d=Math.hypot(waypoint.x-actor.x,waypoint.z-actor.z);
+  if(d<.22||!globalGroundScoreAt(waypoint.ix,waypoint.iz)?.walkable||!segmentClear(actor.x,actor.z,waypoint.x,waypoint.z))waypoint=null;
+ }
+ if(!waypoint){
+  let best=null,bestScore=Infinity;
+  // The Rake advances only to a neighboring globally scored ground tile.
+  // No raycasts, navmesh graph, BFS, or direct long-range target steering.
+  for(let oz=-1;oz<=1;oz++)for(let ox=-1;ox<=1;ox++){
+   if(!ox&&!oz)continue;
+   const tile=globalGroundScoreAt(here.ix+ox,here.iz+oz);
+   if(!tile||!tile.walkable||!segmentClear(actor.x,actor.z,tile.x,tile.z))continue;
+   const remaining=Math.hypot(goal.x-tile.x,goal.z-tile.z);
+   const clearanceBonus=Math.min(tile.score,3)*.62;
+   const revisit=visited.includes(globalGroundScoreKey(tile.ix,tile.iz))?1.9:0;
+   const diagonal=ox&&oz?.08:0;
+   const score=remaining-clearanceBonus+revisit+diagonal;
+   if(score<bestScore){bestScore=score;best=tile}
+  }
+  if(best){waypoint={ix:best.ix,iz:best.iz,x:best.x,z:best.z};actor.rakeGroundWaypoint=waypoint}
+ }
+ if(!waypoint){
+  actor.rakeDirectionScores=[];return;
+ }
+ const dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,distance=Math.hypot(dx,dz);
+ if(distance<.04)return;
+ const step=Math.min(speed*dt,distance),nx=actor.x+dx/distance*step,nz=actor.z+dz/distance*step;
+ if(!segmentClear(actor.x,actor.z,nx,nz)){actor.rakeGroundWaypoint=null;return}
+ actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz);actor.rakeSteerAngle=actor.yaw;
+ actor.rakeDirectionScores=[{angle:actor.yaw,score:bestScore,walkable:true,clearance:globalGroundScoreAt(waypoint.ix,waypoint.iz)?.score??0,travel:step}];
 }
 // GLOBAL all-to-all visibility navigation: any clear cell may ray-connect to any other.
 const globalNavCells=new Map(),globalRayCache=new Map();
