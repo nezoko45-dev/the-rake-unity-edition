@@ -146,14 +146,14 @@ function buildGlobalPolygonDebug(){
     polygons.set(poly.key,poly);
     for(let e=0;e<3;e++){
      const a=vertices[e],b=vertices[(e+1)%3];
-     const ak=a.x+','+a.z,bk=b.x+','+b.z,edge=ak<bk?ak+'|'+bk:bk+'|'+ak;
+     const ak=a.x+','+(a.y??0)+','+a.z,bk=b.x+','+(b.y??0)+','+b.z,edge=ak<bk?ak+'|'+bk:bk+'|'+ak;
      const list=edges.get(edge)||[];list.push(poly);edges.set(edge,list);
     }
    }
   }
  }
  // Only triangles sharing a complete edge are connected.
- for(const p of towerNavPolygons){polygons.set(p.key,p);for(let e=0;e<3;e++){const a=p.vertices[e],b=p.vertices[(e+1)%3],ak=a.x+','+a.y+','+a.z,bk=b.x+','+b.y+','+b.z,edge=ak<bk?ak+'|'+bk:bk+'|'+ak,list=edges.get(edge)||[];list.push(p);edges.set(edge,list)}}for(const list of edges.values())if(list.length===2){list[0].neighbors.push(list[1]);list[1].neighbors.push(list[0])}for(const p of towerNavPolygons){if(!p.vertices.some(v=>Math.abs(v.y)<1e-5))continue;let best=null,bd=3.4;for(const q of polygons.values()){if(q===p||q.key.startsWith('tower:')||Math.abs(q.y)>.05)continue;const d=Math.hypot(q.x-p.x,q.z-p.z);if(d<bd){bd=d;best=q}}if(best){p.neighbors.push(best);best.neighbors.push(p)}}
+ for(const p of towerNavPolygons){polygons.set(p.key,p);for(let e=0;e<3;e++){const a=p.vertices[e],b=p.vertices[(e+1)%3],ak=a.x+','+a.y+','+a.z,bk=b.x+','+b.y+','+b.z,edge=ak<bk?ak+'|'+bk:bk+'|'+ak,list=edges.get(edge)||[];list.push(p);edges.set(edge,list)}}for(const list of edges.values())if(list.length===2){list[0].neighbors.push(list[1]);list[1].neighbors.push(list[0])}for(const p of towerNavPolygons){if(!p.key.includes(':lower:'))continue;const base=p.vertices.filter(v=>Math.abs(v.y)<1e-5);if(!base.length)continue;const bx=base.reduce((n,v)=>n+v.x,0)/base.length,bz=base.reduce((n,v)=>n+v.z,0)/base.length;let best=null,bd=Infinity;for(const q of polygons.values()){if(q.key.startsWith('tower:')||Math.abs(q.y)>.05)continue;const d=Math.hypot(q.x-bx,q.z-bz);if(d<bd){bd=d;best=q}}if(best&&!p.neighbors.includes(best)){p.neighbors.push(best);best.neighbors.push(p)}}
  globalPolygonDebugCache=polygons;return polygons;
 }
 let navDebugRendered=false,navDebugDrawnSignature='';
@@ -188,7 +188,7 @@ function nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
    if(d2<bestSq){bestSq=d2;nearest=poly}
   }
  }
- for(const poly of towerNavPolygons){if(triangleContainsPoint(poly,x,z)&&Math.abs(poly.y-y)<2.2)return poly;const dx=poly.x-x,dz=poly.z-z,dy=poly.y-y,d2=dx*dx+dz*dz+dy*dy*1.8;if(d2<bestSq){bestSq=d2;nearest=poly}}
+ let towerHit=null,towerHeightError=Infinity;for(const poly of towerNavPolygons){if(triangleContainsPoint(poly,x,z)){const surfaceY=triangleHeightAt(poly,x,z),heightError=Math.abs(surfaceY-y);if(heightError<towerHeightError){towerHeightError=heightError;towerHit=poly}}const dx=poly.x-x,dz=poly.z-z,dy=poly.y-y,d2=dx*dx+dz*dz+dy*dy*1.8;if(d2<bestSq){bestSq=d2;nearest=poly}}if(towerHit&&towerHeightError<2.8)return towerHit;
  return nearest;
 }
 function triangleRoute(start,goal){
@@ -227,7 +227,7 @@ function triangleNavMove(actor,goal,dt,speed,portalOnly=false){
   const waypoints=[];
   for(let ri=1;ri<route.length;ri++){
    const prev=route[ri-1],next=route[ri],shared=[];
-   for(const a of prev.vertices)for(const b of next.vertices)if(Math.abs(a.x-b.x)<1e-5&&Math.abs(a.z-b.z)<1e-5)shared.push(a);
+   for(const a of prev.vertices)for(const b of next.vertices)if(Math.abs(a.x-b.x)<1e-5&&Math.abs(a.y-b.y)<1e-5&&Math.abs(a.z-b.z)<1e-5)shared.push(a);
    if(shared.length>=2)waypoints.push({x:(shared[0].x+shared[1].x)*.5,y:(shared[0].y+shared[1].y)*.5,z:(shared[0].z+shared[1].z)*.5});
    else if(!portalOnly)waypoints.push({x:next.x,z:next.z});
    else waypoints.push({x:next.x,y:next.y,z:next.z});
@@ -235,7 +235,7 @@ function triangleNavMove(actor,goal,dt,speed,portalOnly=false){
   waypoints.push({x:goal.x,y:goal.y??target.y,z:goal.z});
   if(!waypoints.length)waypoints.push({x:goal.x,z:goal.z});
  index=Math.min(actor.triangleRouteIndex||0,waypoints.length-1);
- while(index<waypoints.length-1&&Math.hypot(waypoints[index].x-actor.x,waypoints[index].z-actor.z)<.34)index++;
+ while(index<waypoints.length-1&&Math.hypot(waypoints[index].x-actor.x,(waypoints[index].y??actor.y??0)-(actor.y??0),waypoints[index].z-actor.z)<.55)index++;
  actor.triangleRouteIndex=index;
  const waypoint=waypoints[index],dx=waypoint.x-actor.x,dy=(waypoint.y??actor.y??0)-(actor.y??0),dz=waypoint.z-actor.z,d=Math.hypot(dx,dy,dz);
  if(d<.035)return;
