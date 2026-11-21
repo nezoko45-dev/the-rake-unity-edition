@@ -190,6 +190,16 @@ function surfaceAtXZ(polygons,x,z,referenceY=Infinity){
   const h=triangleHeightAt(poly,x,z);
   if(h<=referenceY+.35&&h>bestY){best=poly;bestY=h}
  }
+ // The rendered chunk floor is continuous even where navmesh triangles are
+ // carved around trees and rocks. Keep physical ground collision independent
+ // from AI walkability so actors never fall through those carved cells.
+ if(!best){
+  for(const chunk of chunkMap.values()){
+   const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
+   const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
+   if(x>=minX&&x<maxX&&z>=minZ&&z<maxZ)return {poly:null,y:0};
+  }
+ }
  return best?{poly:best,y:bestY}:null;
 }
 function applyActorFall(actor,dt,offset=0){
