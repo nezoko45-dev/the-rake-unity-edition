@@ -13,6 +13,7 @@ const scene=new THREE.Scene();scene.background=new THREE.Color(0x8db5d3);scene.f
 const camera=new THREE.PerspectiveCamera(76,innerWidth/innerHeight,.1,250);camera.position.set(0,2,14);
 const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
 const controls=new PointerLockControls(camera,renderer.domElement);scene.add(controls.getObject());controls.getObject().position.set(0,2,14);
+const lastSafePlayerPosition=new THREE.Vector3(0,2,14);
 const hemi=new THREE.HemisphereLight(0xc8e4ff,0x34452e,2.2);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffe3b0,2.0);sun.position.set(-20,35,12);scene.add(sun);
 const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});const bark=mat(0x33251b),leaf=mat(0x172d20),leaf2=mat(0x243d29),rock=mat(0x343b3b),pathMat=mat(0x3c3b32);
 const chunkGroundGeometry=new THREE.PlaneGeometry(32,32),chunkGroundMaterial=mat(0x18251b);
@@ -352,6 +353,8 @@ const clock=new THREE.Clock();function tick(){
    noise(keys.ShiftLeft?2:1);
   }
   const playerActor={x:p.x,y:p.y-2,z:p.z,fallVelocity:playerFallVelocity,grounded:false};applyActorFall(playerActor,dt,0);playerFallVelocity=playerActor.fallVelocity;p.y=playerActor.y+2;
+  if(playerActor.grounded&&Number.isFinite(p.y))lastSafePlayerPosition.copy(p);
+  if(!Number.isFinite(p.y)||p.y < -8){p.copy(lastSafePlayerPosition);playerFallVelocity=0;updateChunks();notice('You were returned to safe ground!')}
   updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s · Towers '+generatedTowerCount;
