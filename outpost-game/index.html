@@ -75,7 +75,7 @@ function rakeAnimationForState(state,moving,actualSpeed=0){
  else if(idle)playRakeClip(idle,1);
 }
 const day=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.45;let isNight=false;const DAY_LENGTH=150,NIGHT_LENGTH=450;function setPhase(n){if(isNight===n)return;isNight=n;if(n){day.pause();night.play().catch(()=>{});scene.background.set(0x010204);scene.fog.color.set(0x010204);scene.fog.near=3;scene.fog.far=38;hemi.intensity=.015;sun.intensity=0;moon.intensity=.035}else{night.pause();day.play().catch(()=>{});scene.background.set(0x8db5d3);scene.fog.color.set(0x8db5d3);scene.fog.near=55;scene.fog.far=190;hemi.intensity=2.2;sun.intensity=2;moon.intensity=0}}function playMusic(){(isNight?night:day).play().catch(()=>{})}
-const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState='patrol',lastNoise=0,noisePos=new THREE.Vector3(),enemySpeed=4.3,attackCd=0,gameover=false,rakeHP=15000,rakeDamageCd=0,rakeHurtUntil=0,rakeSlowUntil=0;
+const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState='patrol',lastNoise=0,noisePos=new THREE.Vector3(),enemySpeed=4.3,attackCd=0,gameover=false,rakeHP=15000,rakeDamageCd=0,rakeHurtUntil=0,rakeSlowUntil=0,playerFallVelocity=0;
 function playRakeHurtSound(){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),now=ctx.currentTime;const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(260,now);osc.frequency.exponentialRampToValueAtTime(72,now+.42);filter.type='lowpass';filter.frequency.value=950;gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.22,now+.035);gain.gain.exponentialRampToValueAtTime(.0001,now+.62);osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.65);setTimeout(()=>ctx.close(),900)}catch(e){}}
 function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math.max(0,rakeHP-45);rakeDamageCd=3;rakeHurtUntil=elapsed+1.15;rakeSlowUntil=elapsed+1.8;attackAnimUntil=0;anim(/hurt1|hurt/i);if(action)action.timeScale=1;playRakeHurtSound();notice(source+' hit THE RAKE (-45) · '+rakeHP+' HP');return true}
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
@@ -177,6 +177,33 @@ function bridgeClear(ax,az,bx,bz){
  return true;
 }
 function triangleHeightAt(poly,x,z){const [a,b,c]=poly.vertices;const den=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);if(Math.abs(den)<1e-8)return poly.y;const u=((b.z-c.z)*(x-c.x)+(c.x-b.x)*(z-c.z))/den,v=((c.z-a.z)*(x-c.x)+(a.x-c.x)*(z-c.z))/den,w=1-u-v;return u*(a.y??0)+v*(b.y??0)+w*(c.y??0)}
+function surfaceAtXZ(polygons,x,z,referenceY=Infinity){
+ let best=null,bestY=-Infinity;
+ for(const poly of polygons.values()){
+  if(!triangleContainsPoint(poly,x,z))continue;
+  const h=triangleHeightAt(poly,x,z);
+  if(h<=referenceY+.35&&h>bestY){best=poly;bestY=h}
+ }
+ for(const poly of towerNavPolygons){
+  if(!triangleContainsPoint(poly,x,z))continue;
+  const h=triangleHeightAt(poly,x,z);
+  if(h<=referenceY+.35&&h>bestY){best=poly;bestY=h}
+ }
+ return best?{poly:best,y:bestY}:null;
+}
+function applyActorFall(actor,dt,offset=0){
+ const polygons=buildGlobalPolygonDebug(),surface=surfaceAtXZ(polygons,actor.x,actor.z,actor.y-offset);
+ actor.fallVelocity=actor.fallVelocity||0;
+ if(surface){
+  const ground=surface.y+offset,feet=actor.y;
+  if(feet<=ground+.12&&actor.fallVelocity>=0){actor.y=ground;actor.fallVelocity=0;actor.grounded=true;return}
+  if(ground>feet-.45&&actor.fallVelocity<=0){actor.y=ground;actor.fallVelocity=0;actor.grounded=true;return}
+  actor.grounded=false;
+ }else actor.grounded=false;
+ if(!actor.grounded){actor.fallVelocity=Math.min(32,actor.fallVelocity+24*dt);actor.y-=actor.fallVelocity*dt;
+  if(surface&&actor.y<=surface.y+offset){actor.y=surface.y+offset;actor.fallVelocity=0;actor.grounded=true}
+ }
+}
 function nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
  const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
  const radius=Math.ceil(maxDistance/NAV_TRI_CELL)+1;let nearest=null,bestSq=maxDistance*maxDistance;
@@ -205,7 +232,7 @@ function triangleRoute(start,goal){
   visited.add(node.key);
   for(const next of node.neighbors){
    if(visited.has(next.key))continue;
-   const cost=item.cost+Math.hypot(next.x-node.x,next.z-node.z);
+   const cost=item.cost+Math.hypot(next.x-node.x,next.y-node.y,next.z-node.z);
    if(cost<(dist.get(next.key)??Infinity)){dist.set(next.key,cost);parent.set(next.key,node);push(next,cost)}
   }
  }
@@ -252,7 +279,7 @@ for(let i=0;i<4;i++)survivors.push(makeSurvivor([-8,8,-8,8][i],[8,8,-8,-8][i],i)
 function updateSurvivors(dt){const p=controls.getObject().position;for(const a of survivors){if(monster&&a.hp>0&&a.mesh.visible&&Math.hypot(monster.position.x-a.x,monster.position.z-a.z)<=8&&rakeDamageCd<=0)damageRake('Survivor '+(a.id+1));if(a.hp<=0){if(elapsed>=a.respawnAt){a.hp=100;a.x=a.spawnX;a.y=a.spawnY;a.z=a.spawnZ;a.mesh.visible=true;a.target=null;a.nextPick=elapsed+1;notice('A survivor respawned')}else{a.mesh.visible=false;continue}}const rakeD=Math.hypot(monster?monster.position.x-a.x:999,monster?monster.position.z-a.z:999);a.attack=!!monster&&rakeD<2.8;let moving=false;if(a.attack){a.mesh.rotation.y=Math.atan2(monster.position.x-a.x,monster.position.z-a.z);a.phase+=dt*8;a.arms[0].rotation.x=-1.8+Math.sin(a.phase)*.25;a.arms[1].rotation.x=-1.8-Math.sin(a.phase)*.25;a.legs[0].rotation.x=0;a.legs[1].rotation.x=0}
 else{if(!a.target||Math.hypot(a.target.x-a.x,a.target.z-a.z)<2||elapsed>a.nextPick){const decks=towerNavPolygons.filter(p=>p.key.includes(':deck:'));if(decks.length&&rand()<.22){const deck=decks[Math.floor(rand()*decks.length)];a.target={x:deck.x,y:deck.y,z:deck.z}}else{let tx=a.x,tz=a.z;for(let tries=0;tries<14;tries++){const angle=rand()*Math.PI*2,dist=8+rand()*22;tx=a.x+Math.cos(angle)*dist;tz=a.z+Math.sin(angle)*dist;if(!blocked(tx,tz))break}a.target={x:tx,y:0,z:tz}}a.nextPick=elapsed+5+rand()*6}
 const beforeX=a.x,beforeZ=a.z;triangleNavMove(a,{...a.target,y:a.target.y??0},dt,randWalkSpeed(a));moving=Math.hypot(a.x-beforeX,a.z-beforeZ)>.002;if(moving)a.mesh.rotation.y=Math.atan2(a.target.x-a.x,a.target.z-a.z);a.phase+=dt*(moving?7:2);const swing=moving?Math.sin(a.phase)*.65:Math.sin(a.phase)*.04;a.legs[0].rotation.x=swing;a.legs[1].rotation.x=-swing;a.arms[0].rotation.x=-swing*.7;a.arms[1].rotation.x=swing*.7}
-a.mesh.position.set(a.x,a.y+Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)}}
+applyActorFall(a,dt,0);a.mesh.position.set(a.x,a.y+Math.abs(Math.sin(a.phase))* (moving ? .045 : .012),a.z)}}
 function randWalkSpeed(a){return 2.1+((a.phase*17)%1)*.8}
 
 function noise(strength=1){lastNoise=elapsed;noisePos.copy(controls.getObject().position);if(strength>1)notice('Your footsteps echo through the forest…')}
@@ -289,7 +316,7 @@ function updateRakeHeadLook(dt){
   // A chase target is valid only while within 45 units. Losing it clears chase
   // state immediately and falls through to investigation/patrol instead.
   const target=entities.find(e=>e.entity===chaseTarget&&Math.hypot(e.x-monster.position.x,e.z-monster.position.z)<=45)||null;
-  if(target){const td=Math.hypot(target.x-monster.position.x,target.z-monster.position.z);if(td<2.2){enemyState='attack';goal={x:target.x,y:target.y,z:target.z};enemySpeed=0}else{enemyState=target.isPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=td<4?6.8:5.8}}
+  if(target){const td=Math.hypot(target.x-monster.position.x,target.z-monster.position.z);if(td<2.2){enemyState='attack';goal={x:target.x,y:target.y,z:target.z};enemySpeed=0}else{enemyState=target.isPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,y:target.y??0,z:target.z};enemySpeed=td<4?6.8:5.8}}
   else{
    chaseTarget=null;
    if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,y:0,z:noisePos.z};enemySpeed=4.8}
@@ -297,7 +324,7 @@ function updateRakeHeadLook(dt){
   }
  }
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
- const navActor=monster.navActor||(monster.navActor={x:monster.position.x,y:0,z:monster.position.z});navActor.x=monster.position.x;navActor.y=monster.position.y-monsterGroundOffset;navActor.z=monster.position.z;triangleNavMove(navActor,{...goal,y:goal.y??navActor.y},dt,enemySpeed,true);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset+navActor.y;
+ const navActor=monster.navActor||(monster.navActor={x:monster.position.x,y:0,z:monster.position.z});navActor.x=monster.position.x;navActor.y=monster.position.y-monsterGroundOffset;navActor.z=monster.position.z;triangleNavMove(navActor,{...goal,y:goal.y??navActor.y},dt,enemySpeed,true);monster.position.x=navActor.x;monster.position.z=navActor.z;monster.position.y=monsterGroundOffset+navActor.y;applyActorFall(navActor,dt,0);monster.position.y=monsterGroundOffset+navActor.y;
  const gx=goal.x-monster.position.x,gz=goal.z-monster.position.z;if(Math.hypot(gx,gz)>.1){const desiredYaw=navActor.yaw??Math.atan2(gx,gz),yawDelta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));monster.rotation.y+=yawDelta*(1-Math.exp(-7*dt));}
  const frameMove=Math.hypot(navActor.x-oldX,navActor.z-oldZ),actualSpeed=frameMove/Math.max(dt,.001),moving=actualSpeed>.08;rakeAnimationForState(enemyState,moving,actualSpeed);
  attackCd-=dt;if(chaseTarget===p&&d<2.2&&attackCd<=0){player.hp=Math.max(0,player.hp-24);attackCd=1.05;notice('THE HUNTER HIT YOU!');attackAnimUntil=elapsed+1.0;anim(/attack|hit|bite|kill/i);if(player.hp<=0){player.hp=100;controls.getObject().position.set(0,2,14);noise(1);notice('You respawned!')}}
@@ -324,7 +351,7 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  const playerSurface=nearestWalkableTriangle(buildGlobalPolygonDebug(),p.x,p.z,3,p.y-2);if(playerSurface){const h=triangleHeightAt(playerSurface,p.x,p.z);if(Number.isFinite(h))p.y=THREE.MathUtils.damp(p.y,h+2,12,dt)}
+  const playerActor={x:p.x,y:p.y-2,z:p.z,fallVelocity:playerFallVelocity,grounded:false};applyActorFall(playerActor,dt,0);playerFallVelocity=playerActor.fallVelocity;p.y=playerActor.y+2;
   updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s · Towers '+generatedTowerCount;
