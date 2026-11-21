@@ -204,7 +204,17 @@ function triangleNavMove(actor,goal,dt,speed){
   if(!route){actor.triangleRoute=null;return}
   actor.triangleRoute=route;actor.triangleRouteGoal=target.key;actor.triangleRouteSignature=globalPolygonDebugSignature;actor.triangleRouteAt=elapsed;actor.triangleRouteIndex=0;index=0;
  }
- const waypoints=route.length===1?[{x:goal.x,z:goal.z}]:route.slice(0,-1).map(p=>({x:p.x,z:p.z})).concat([{x:goal.x,z:goal.z}]);
+ // Travel through shared-edge portals, not alternating triangle centroids.
+  // Centroid-to-centroid routing zigzags across every diagonal in the mesh.
+  const waypoints=[];
+  for(let ri=1;ri<route.length;ri++){
+   const prev=route[ri-1],next=route[ri],shared=[];
+   for(const a of prev.vertices)for(const b of next.vertices)if(Math.abs(a.x-b.x)<1e-5&&Math.abs(a.z-b.z)<1e-5)shared.push(a);
+   if(shared.length>=2)waypoints.push({x:(shared[0].x+shared[1].x)*.5,z:(shared[0].z+shared[1].z)*.5});
+   else waypoints.push({x:next.x,z:next.z});
+  }
+  waypoints.push({x:goal.x,z:goal.z});
+  if(!waypoints.length)waypoints.push({x:goal.x,z:goal.z});
  index=Math.min(actor.triangleRouteIndex||0,waypoints.length-1);
  while(index<waypoints.length-1&&Math.hypot(waypoints[index].x-actor.x,waypoints[index].z-actor.z)<.34)index++;
  actor.triangleRouteIndex=index;
