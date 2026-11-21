@@ -128,7 +128,7 @@ function buildGlobalPolygonDebug(){
   for(let iz=minIz;iz<=maxIz;iz++)for(let ix=minIx;ix<=maxIx;ix++){
    const x=ix*NAV_TRI_CELL,z=iz*NAV_TRI_CELL,n=NAV_TRI_CELL,cx=x+n*.5,cz=z+n*.5;
    if(cx<minX||cx>=maxX||cz<minZ||cz>=maxZ)continue;
-   const A={x,z},B={x:x+n,z},C={x:x+n,z:z+n},D={x,z:z+n};
+   const A={x,y:0,z},B={x:x+n,y:0,z},C={x:x+n,y:0,z:z+n},D={x,y:0,z:z+n};
    const tris=[[A,B,C],[A,C,D]];
    for(let t=0;t<2;t++){
     const vertices=tris[t];
@@ -142,7 +142,7 @@ function buildGlobalPolygonDebug(){
     }
     if(carved)continue;
     const tx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,tz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
-    const poly={key:key(ix,iz,t),ix,iz,tri:t,x:tx,z:tz,vertices,neighbors:[]};
+    const poly={key:key(ix,iz,t),ix,iz,tri:t,x:tx,y:0,z:tz,vertices,neighbors:[]};
     polygons.set(poly.key,poly);
     for(let e=0;e<3;e++){
      const a=vertices[e],b=vertices[(e+1)%3];
@@ -176,7 +176,7 @@ function bridgeClear(ax,az,bx,bz){
  for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t))return false}
  return true;
 }
-function triangleHeightAt(poly,x,z){const [a,b,c]=poly.vertices;const den=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);if(Math.abs(den)<1e-8)return poly.y;const u=((b.z-c.z)*(x-c.x)+(c.x-b.x)*(z-c.z))/den,v=((c.z-a.z)*(x-c.x)+(a.x-c.x)*(z-c.z))/den,w=1-u-v;return u*a.y+v*b.y+w*c.y}
+function triangleHeightAt(poly,x,z){const [a,b,c]=poly.vertices;const den=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);if(Math.abs(den)<1e-8)return poly.y;const u=((b.z-c.z)*(x-c.x)+(c.x-b.x)*(z-c.z))/den,v=((c.z-a.z)*(x-c.x)+(a.x-c.x)*(z-c.z))/den,w=1-u-v;return u*(a.y??0)+v*(b.y??0)+w*(c.y??0)}
 function nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
  const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
  const radius=Math.ceil(maxDistance/NAV_TRI_CELL)+1;let nearest=null,bestSq=maxDistance*maxDistance;
