@@ -49,12 +49,13 @@ function rakeAnimationForState(state,moving,actualSpeed=0){
  const hurt=clips.find(c=>/hurt1|hurt/i.test(c.name)),attack=clips.find(c=>/attack|hit|bite|kill/i.test(c.name));
  if(elapsed<rakeHurtUntil&&hurt){playRakeClip(hurt,1);return}
  if((elapsed<attackAnimUntil||state==='attack')&&attack){playRakeClip(attack,1);return}
+ const hunting=/hunt|retreat/i.test(state);
  const walk=clips.find(c=>c.name.trim().toLowerCase()==='walk')||clips.find(c=>/^walk(?:ing)?(?:$|[_ .-])/i.test(c.name)||/walk/i.test(c.name)&&!/run|attack|hurt|idle/i.test(c.name));
  const run=clips.find(c=>/run|sprint/i.test(c.name)&&!/attack|hurt/i.test(c.name));
  const idle=clips.find(c=>/idle|stand|breath/i.test(c.name));
- // The navmesh glides the Rake along triangle waypoints; the walk cycle supplies the legs.
- // Use actual displacement so blocked movement never produces a fake walking animation.
- if(moving){const walkRate=THREE.MathUtils.clamp(actualSpeed/3.7,.72,1.3);if(walk||run)playRakeClip(walk||run,walkRate)}
+ // Hunt states are only assigned while a target is within the 45-unit detection radius.
+ // Glide movement remains navmesh-driven; this only selects the visual locomotion clip.
+ if(moving){const locomotion=hunting?(run||walk):(walk||run);const rate=hunting?THREE.MathUtils.clamp(actualSpeed/5.8, .85, 1.25):THREE.MathUtils.clamp(actualSpeed/3.7,.72,1.3);if(locomotion)playRakeClip(locomotion,rate)}
  else if(idle)playRakeClip(idle,1);
 }
 const day=new Audio(new URL('../Assets/Welcome%20to%20Whispering%20Pines.mp3',import.meta.url));const night=new Audio(new URL('../Assets/The%20Calm%20-%20Kazuma%20Jinnouchi%20(Soundtrack%203%20-%20Do%20You%20Copy).mp3',import.meta.url));day.loop=night.loop=true;day.volume=night.volume=.45;let isNight=false;const DAY_LENGTH=150,NIGHT_LENGTH=450;function setPhase(n){if(isNight===n)return;isNight=n;if(n){day.pause();night.play().catch(()=>{});scene.background.set(0x010204);scene.fog.color.set(0x010204);scene.fog.near=3;scene.fog.far=38;hemi.intensity=.015;sun.intensity=0;moon.intensity=.035}else{night.pause();day.play().catch(()=>{});scene.background.set(0x8db5d3);scene.fog.color.set(0x8db5d3);scene.fog.near=55;scene.fog.far=190;hemi.intensity=2.2;sun.intensity=2;moon.intensity=0}}function playMusic(){(isNight?night:day).play().catch(()=>{})}
