@@ -14,41 +14,22 @@ const camera=new THREE.PerspectiveCamera(76,innerWidth/innerHeight,.1,250);camer
 const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
 const controls=new PointerLockControls(camera,renderer.domElement);scene.add(controls.getObject());controls.getObject().position.set(0,2,14);
 const hemi=new THREE.HemisphereLight(0xc8e4ff,0x34452e,2.2);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffe3b0,2.0);sun.position.set(-20,35,12);scene.add(sun);
-const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});
-const obstacles=[];function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block)obstacles.push({x,z,r:Math.max(sx,sz)*.52,minX:x-sx/2,maxX:x+sx/2,minZ:z-sz/2,maxZ:z+sz/2,meshes:[o]});return o}
+const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});const bark=mat(0x33251b),leaf=mat(0x172d20),leaf2=mat(0x243d29),rock=mat(0x343b3b),pathMat=mat(0x3c3b32);
+const chunkGroundGeometry=new THREE.PlaneGeometry(32,32),chunkGroundMaterial=mat(0x18251b);
+const obstacles=[];function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block)obstacles.push({x,z,r:Math.max(sx,sz)*.52,meshes:[o]});return o}
+const trail=new THREE.Mesh(new THREE.PlaneGeometry(12,260),pathMat);trail.rotation.x=-Math.PI/2;trail.position.y=.015;scene.add(trail);
+const trail2=new THREE.Mesh(new THREE.PlaneGeometry(180,9),pathMat);trail2.rotation.x=-Math.PI/2;trail2.position.y=.02;scene.add(trail2);
 let seed=931;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
-const CHUNK=32,chunkMap=new Map();let forestMapRoot=null,forestMapBounds=null,forestMapReady=false;
-function updateChunks(){}
+const CHUNK=32,CHUNK_RADIUS=2,chunkMap=new Map();
+function pine(x,z,h,items,obs){const treeH=h*1.65;const trunkH=treeH*.52;const meshes=[];const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.28,.48,trunkH,6),bark);trunk.position.set(x,trunkH/2,z);scene.add(trunk);items.push(trunk);meshes.push(trunk);for(let k=0;k<3;k++){const crown=new THREE.Mesh(new THREE.ConeGeometry(treeH*(.28-k*.045),treeH*.42,7),k===1?leaf2:leaf);crown.position.set(x,trunkH+treeH*.18+k*treeH*.22,z);scene.add(crown);items.push(crown);meshes.push(crown)}obs.push({x,z,r:1.25,meshes})}
+function makeChunk(cx,cz){const key=cx+','+cz;if(chunkMap.has(key))return;const items=[],obs=[];let local=(Math.imul(cx+7919,374761393)^Math.imul(cz+104729,668265263))>>>0;function cr(){local=(local*1664525+1013904223)>>>0;return local/4294967296}
+const groundTile=new THREE.Mesh(chunkGroundGeometry,chunkGroundMaterial);groundTile.rotation.x=-Math.PI/2;groundTile.position.set(cx*CHUNK,-.025,cz*CHUNK);groundTile.receiveShadow=true;scene.add(groundTile);items.push(groundTile);
+for(let i=0;i<24;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<9||Math.abs(z)<7)continue;pine(x,z,6+cr()*9,items,obs)}
+for(let i=0;i<3;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<10&&Math.abs(z)<10)continue;const rr=.7+cr()*1.5,o=new THREE.Mesh(new THREE.DodecahedronGeometry(rr,0),rock);o.position.set(x,rr*.55,z);scene.add(o);items.push(o);obs.push({x,z,r:rr*.8,meshes:[o]})}
+chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs)}
+function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key);globalPolygonDebugCache=null}}}
 const flashlight=new THREE.SpotLight(0xe4f0ff,0,42,Math.PI/9,.32,1.15);flashlight.position.set(0,-.08,-.18);camera.add(flashlight);const ft=new THREE.Object3D();ft.position.set(0,0,-12);camera.add(ft);flashlight.target=ft;let lightOn=false;
 const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null,action=null,headBone=null,headBaseY=0;
-function loadForestMap(){
- const mapPath='../Assets/a_forest_3_with_a_road_at_night_for_game.glb';
- loader.load(mapPath,g=>{
-  forestMapRoot=g.scene;forestMapRoot.name='Forest Freeplay Authored Map';scene.add(forestMapRoot);
-  forestMapRoot.updateMatrixWorld(true);forestMapBounds=new THREE.Box3().setFromObject(forestMapRoot);
-  if(forestMapBounds.isEmpty()){notice('Forest map loaded but contains no geometry.');return}
-  const size=forestMapBounds.getSize(new THREE.Vector3()),center=forestMapBounds.getCenter(new THREE.Vector3());
-  const navMinX=forestMapBounds.min.x,navMaxX=forestMapBounds.max.x,navMinZ=forestMapBounds.min.z,navMaxZ=forestMapBounds.max.z;
-  chunkMap.clear();chunkMap.set('authored-forest',{cx:0,cz:0,minX:navMinX,maxX:navMaxX,minZ:navMinZ,maxZ:navMaxZ});
-  // Use per-mesh world-space bounds as blockers; ignore broad terrain/road meshes.
-  obstacles.length=0;let scanned=0,blockerCount=0;
-  forestMapRoot.traverse(mesh=>{
-   if(!mesh.isMesh||!mesh.geometry)return;scanned++;
-   mesh.geometry.computeBoundingBox();const b=new THREE.Box3().setFromObject(mesh);if(b.isEmpty())return;
-   const sz=b.getSize(new THREE.Vector3()),cx=(b.min.x+b.max.x)*.5,cz=(b.min.z+b.max.z)*.5;
-   if(sz.y<.35||sz.x>24||sz.z>24||sz.x<.12&&sz.z<.12)return;
-   if(sz.y<.65&&Math.max(sz.x,sz.z)>3)return;
-   obstacles.push({x:cx,z:cz,r:Math.max(sz.x,sz.z)*.5,minX:b.min.x,maxX:b.max.x,minZ:b.min.z,maxZ:b.max.z,meshes:[mesh],sourceName:mesh.name||'GLB mesh'});blockerCount++;
-  });
-  globalPolygonDebugCache=null;globalPolygonDebugSignature='';
-  const inside=(x,z)=>x>=navMinX+2&&x<=navMaxX-2&&z>=navMinZ+2&&z<=navMaxZ-2;
-  if(!inside(0,14))controls.getObject().position.set(center.x,2,center.z+Math.min(14,size.z*.2));
-  if(!inside(rakeSpawn.x,rakeSpawn.z)){rakeSpawn.x=center.x;rakeSpawn.z=center.z-size.z*.28}
-  notice('Forest GLB loaded · '+blockerCount+' mesh bounds registered');
-  console.log('Forest GLB bounds',forestMapBounds,'mesh count',scanned,'blockers',blockerCount);
- },undefined,err=>{console.error('Forest GLB failed to load',err);notice('Forest map failed to load: check Assets GLB path')});
-}
-
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','/the-rake-unity-edition/Assets/dover_demon_the_rake_-_v1.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
 function loadModel(i=0){if(i>=paths.length){notice('Monster model failed; refresh after checking Assets.');return}loader.load(paths[i],g=>{template=g.scene;clips=g.animations;spawnMonster();console.log('Loaded reused Rake GLB',paths[i],clips.map(c=>c.name))},undefined,()=>loadModel(i+1))}
 function findHeadControlBone(root){const bones=[];root.traverse(o=>{if(o.isBone)bones.push(o)});if(!bones.length)return null;const named=bones.map(b=>{const n=b.name.toLowerCase();let score=0;if(/head|skull|cranium/.test(n))score+=100;if(/neck/.test(n))score+=45;if(/face|jaw|eye|look/.test(n))score+=25;if(/upper|top/.test(n))score+=5;return {bone:b,score}}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);if(named.length)return named[0].bone;root.updateMatrixWorld(true);let highest=null,maxY=-Infinity;for(const b of bones){const p=new THREE.Vector3();b.getWorldPosition(p);if(p.y>maxY){maxY=p.y;highest=b}}return highest}
@@ -89,7 +70,7 @@ let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
 let navDebug=false;
 const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);
 addEventListener('keydown',e=>{if(e.code==='KeyG'&&!e.repeat){navDebug=!navDebug;notice('Triangle navmesh '+(navDebug?'ON':'OFF'))}});
-function blocked(x,z){return obstacles.some(o=>x>=(o.minX??o.x-o.r)-.65&&x<=(o.maxX??o.x+o.r)+.65&&z>=(o.minZ??o.z-o.r)-.65&&z<=(o.maxZ??o.z+o.r)+.65)}
+function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+.8)}
 function triangleContainsPoint(poly,x,z){
  const [a,b,c]=poly.vertices;
  const v0x=c.x-a.x,v0z=c.z-a.z,v1x=b.x-a.x,v1z=b.z-a.z,v2x=x-a.x,v2z=z-a.z;
@@ -104,14 +85,14 @@ function pointSegmentDistanceSq(px,pz,a,b){
  const x=a.x+dx*t,z=a.z+dz*t;return(px-x)*(px-x)+(pz-z)*(pz-z);
 }
 function triangleTouchesObstacle(vertices,o){
- const minX=(o.minX??o.x-o.r)-.45,maxX=(o.maxX??o.x+o.r)+.45,minZ=(o.minZ??o.z-o.r)-.45,maxZ=(o.maxZ??o.z+o.r)+.45;
- if(vertices.some(v=>v.x>=minX&&v.x<=maxX&&v.z>=minZ&&v.z<=maxZ))return true;
- const corners=[{x:minX,z:minZ},{x:maxX,z:minZ},{x:maxX,z:maxZ},{x:minX,z:maxZ}];
- if(corners.some(p=>triangleContainsPoint({vertices},p.x,p.z)))return true;
- for(let i=0;i<3;i++)for(let j=0;j<4;j++)if(segmentsIntersect2D(vertices[i],vertices[(i+1)%3],corners[j],corners[(j+1)%4]))return true;
+ const radius=o.r+.8,r2=radius*radius;
+ if(triangleContainsPoint({vertices},o.x,o.z))return true;
+ for(let i=0;i<3;i++){
+  const a=vertices[i],b=vertices[(i+1)%3];
+  if(pointSegmentDistanceSq(o.x,o.z,a,b)<=r2)return true;
+ }
  return false;
 }
-function segmentsIntersect2D(a,b,c,d){const cross=(p,q,r)=>(q.x-p.x)*(r.z-p.z)-(q.z-p.z)*(r.x-p.x);const x1=cross(a,b,c),x2=cross(a,b,d),x3=cross(c,d,a),x4=cross(c,d,b);return x1*x2<=0&&x3*x4<=0}
 function buildGlobalPolygonDebug(){
  const signature=[...chunkMap.keys()].sort().join('|')+':'+obstacles.length;
  if(globalPolygonDebugCache&&signature===globalPolygonDebugSignature)return globalPolygonDebugCache;
@@ -122,10 +103,10 @@ function buildGlobalPolygonDebug(){
  // Include a full clearance margin when selecting buckets: an obstacle can
  // carve triangles even when its center lies in an adjacent bucket.
  let obstacleSearchMargin=4.5;
- for(const o of obstacles){obstacleSearchMargin=Math.max(obstacleSearchMargin,Math.max(o.x-(o.minX??o.x-o.r),(o.maxX??o.x+o.r)-o.x,o.z-(o.minZ??o.z-o.r),(o.maxZ??o.z+o.r)-o.z)+2.2);const bx0=Math.floor((o.minX??o.x-o.r)/obstacleCell),bx1=Math.floor((o.maxX??o.x+o.r)/obstacleCell),bz0=Math.floor((o.minZ??o.z-o.r)/obstacleCell),bz1=Math.floor((o.maxZ??o.z+o.r)/obstacleCell);for(let bz=bz0;bz<=bz1;bz++)for(let bx=bx0;bx<=bx1;bx++){const bk=bx+','+bz;let bucket=obstacleBuckets.get(bk);if(!bucket)obstacleBuckets.set(bk,bucket=[]);bucket.push(o)}}
+ for(const o of obstacles){obstacleSearchMargin=Math.max(obstacleSearchMargin,o.r+2.2);const bx=Math.floor(o.x/obstacleCell),bz=Math.floor(o.z/obstacleCell),bk=bx+','+bz;let bucket=obstacleBuckets.get(bk);if(!bucket)obstacleBuckets.set(bk,bucket=[]);bucket.push(o)}
  for(const chunk of chunkMap.values()){
-  const minX=chunk.minX??(chunk.cx*CHUNK-CHUNK*.5),maxX=chunk.maxX??(chunk.cx*CHUNK+CHUNK*.5);
-  const minZ=chunk.minZ??(chunk.cz*CHUNK-CHUNK*.5),maxZ=chunk.maxZ??(chunk.cz*CHUNK+CHUNK*.5);
+  const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
+  const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
   const minIx=Math.floor(minX/NAV_TRI_CELL)-1,maxIx=Math.ceil(maxX/NAV_TRI_CELL)+1;
   const minIz=Math.floor(minZ/NAV_TRI_CELL)-1,maxIz=Math.ceil(maxZ/NAV_TRI_CELL)+1;
   for(let iz=minIz;iz<=maxIz;iz++)for(let ix=minIx;ix<=maxIx;ix++){
@@ -141,7 +122,7 @@ function buildGlobalPolygonDebug(){
     const minBX=Math.floor((x-obstacleSearchMargin)/obstacleCell),maxBX=Math.floor((x+n+obstacleSearchMargin)/obstacleCell),minBZ=Math.floor((z-obstacleSearchMargin)/obstacleCell),maxBZ=Math.floor((z+n+obstacleSearchMargin)/obstacleCell);
     for(let bz=minBZ;bz<=maxBZ&&!carved;bz++)for(let bx=minBX;bx<=maxBX&&!carved;bx++){
      const nearby=obstacleBuckets.get(bx+','+bz);if(!nearby)continue;
-     for(const o of nearby){if(x+n<(o.minX??o.x-o.r)-2.2||x>(o.maxX??o.x+o.r)+2.2||z+n<(o.minZ??o.z-o.r)-2.2||z>(o.maxZ??o.z+o.r)+2.2)continue;if(triangleTouchesObstacle(vertices,o)){carved=true;break}}
+     for(const o of nearby){if(Math.abs(o.x-cx)>o.r+2.2||Math.abs(o.z-cz)>o.r+2.2)continue;if(triangleTouchesObstacle(vertices,o)){carved=true;break}}
     }
     if(carved)continue;
     const tx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,tz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
@@ -334,7 +315,6 @@ const clock=new THREE.Clock();function tick(){
  renderer.render(scene,camera);
 }
 tick();
-loadForestMap();
 renderer.domElement.addEventListener('click',()=>{if(started&&!gameover&&!controls.isLocked)controls.lock()});
 document.querySelector('#start').onclick=()=>{started=true;document.querySelector('#overlay').style.display='none';controls.lock();setPhase(true);playMusic();noise(1)};document.querySelector('#overlay').addEventListener('click',e=>{if(started&&e.target.id==='overlay')controls.lock()});loadModel();addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 </script></body></html>
