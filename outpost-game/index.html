@@ -5,7 +5,8 @@
 <div id="hud"><b>THE RAKE <span style="color:#d8a25e">/ FOREST FREEPLAY</span></b><div id="status">DAY · FOREST</div><div id="clock">DAY 02:00</div><div id="stats">HP 100 · Freeplay</div><div style="height:6px;background:#27323a;margin-top:8px"><div id="bar" style="height:100%;width:100%;background:#64d68a"></div></div><div id="survivor-hud" style="margin-top:8px;font-size:12px;line-height:1.5">SURVIVORS<br>Loading…</div><small>Explore the forest. Survive as long as you can.</small></div>
 <div id="help">WASD move · Mouse look · Shift sprint · F flashlight · Click mouse lock<br>Freeplay · Explore the forest</div><div id="cross"></div><div id="notice"></div>
 <div id="overlay"><div id="panel"><h1>THE RAKE: FOREST FREEPLAY</h1><p>No objectives. No missions. Just freeplay—explore while the hunter roams and reacts to you.</p><p><small>Same Rake model and soundtrack assets; new map and AI behavior.</small></p><button id="start">ENTER THE FOREST</button></div></div>
-<script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
+<script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});
+let noticeHideTimer=0;function notice(message){const el=document.querySelector('#notice');if(!el)return;el.textContent=String(message);el.style.display='block';clearTimeout(noticeHideTimer);noticeHideTimer=setTimeout(()=>{el.style.display='none'},2800)}window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
 <script type="module">
 import * as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';import * as SU from 'three/addons/utils/SkeletonUtils.js';
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8db5d3);scene.fog=new THREE.Fog(0x8db5d3,55,190);
@@ -22,8 +23,8 @@ let seed=931;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294
 const CHUNK=32,CHUNK_RADIUS=2,chunkMap=new Map();
 function pine(x,z,h,items,obs){const treeH=h*1.65;const trunkH=treeH*.52;const meshes=[];const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.28,.48,trunkH,6),bark);trunk.position.set(x,trunkH/2,z);scene.add(trunk);items.push(trunk);meshes.push(trunk);for(let k=0;k<3;k++){const crown=new THREE.Mesh(new THREE.ConeGeometry(treeH*(.28-k*.045),treeH*.42,7),k===1?leaf2:leaf);crown.position.set(x,trunkH+treeH*.18+k*treeH*.22,z);scene.add(crown);items.push(crown);meshes.push(crown)}obs.push({x,z,r:.75,meshes})}
 function makeChunk(cx,cz){const key=cx+','+cz;if(chunkMap.has(key))return;const items=[],obs=[];let local=(Math.imul(cx+7919,374761393)^Math.imul(cz+104729,668265263))>>>0;function cr(){local=(local*1664525+1013904223)>>>0;return local/4294967296}
-for(let i=0;i<34;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<9||Math.abs(z)<7)continue;pine(x,z,6+cr()*9,items,obs)}
-for(let i=0;i<5;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<10&&Math.abs(z)<10)continue;const rr=.7+cr()*1.5,o=new THREE.Mesh(new THREE.DodecahedronGeometry(rr,0),rock);o.position.set(x,rr*.55,z);scene.add(o);items.push(o);obs.push({x,z,r:rr*.8,meshes:[o]})}
+for(let i=0;i<24;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<9||Math.abs(z)<7)continue;pine(x,z,6+cr()*9,items,obs)}
+for(let i=0;i<3;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<10&&Math.abs(z)<10)continue;const rr=.7+cr()*1.5,o=new THREE.Mesh(new THREE.DodecahedronGeometry(rr,0),rock);o.position.set(x,rr*.55,z);scene.add(o);items.push(o);obs.push({x,z,r:rr*.8,meshes:[o]})}
 chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs)}
 function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key);globalPolygonDebugCache=null}}}
 const flashlight=new THREE.SpotLight(0xe4f0ff,0,42,Math.PI/9,.32,1.15);flashlight.position.set(0,-.08,-.18);camera.add(flashlight);const ft=new THREE.Object3D();ft.position.set(0,0,-12);camera.add(ft);flashlight.target=ft;let lightOn=false;
@@ -95,6 +96,9 @@ function buildGlobalPolygonDebug(){
  if(globalPolygonDebugCache&&signature===globalPolygonDebugSignature)return globalPolygonDebugCache;
  globalPolygonDebugSignature=signature;
  const polygons=new Map(),edges=new Map(),key=(ix,iz,t)=>ix+','+iz+','+t;
+ // Bucket obstacles once so each triangle checks only nearby objects, not the entire forest.
+ const obstacleCell=16,obstacleBuckets=new Map();
+ for(const o of obstacles){const bx=Math.floor(o.x/obstacleCell),bz=Math.floor(o.z/obstacleCell),bk=bx+','+bz;let bucket=obstacleBuckets.get(bk);if(!bucket)obstacleBuckets.set(bk,bucket=[]);bucket.push(o)}
  for(const chunk of chunkMap.values()){
   const minX=chunk.cx*CHUNK-CHUNK*.5,maxX=chunk.cx*CHUNK+CHUNK*.5;
   const minZ=chunk.cz*CHUNK-CHUNK*.5,maxZ=chunk.cz*CHUNK+CHUNK*.5;
@@ -110,7 +114,11 @@ function buildGlobalPolygonDebug(){
     // Carve only triangles intersecting an obstacle's actual circular bounds.
     // Neighboring triangles remain walkable, preserving narrow passages.
     let carved=false;
-    for(const o of obstacles){if(triangleTouchesObstacle(vertices,o)){carved=true;break}}
+    const minBX=Math.floor((x-.1)/obstacleCell),maxBX=Math.floor((x+n+.1)/obstacleCell),minBZ=Math.floor((z-.1)/obstacleCell),maxBZ=Math.floor((z+n+.1)/obstacleCell);
+    for(let bz=minBZ;bz<=maxBZ&&!carved;bz++)for(let bx=minBX;bx<=maxBX&&!carved;bx++){
+     const nearby=obstacleBuckets.get(bx+','+bz);if(!nearby)continue;
+     for(const o of nearby){if(Math.abs(o.x-cx)>o.r+2.2||Math.abs(o.z-cz)>o.r+2.2)continue;if(triangleTouchesObstacle(vertices,o)){carved=true;break}}
+    }
     if(carved)continue;
     const tx=(vertices[0].x+vertices[1].x+vertices[2].x)/3,tz=(vertices[0].z+vertices[1].z+vertices[2].z)/3;
     const poly={key:key(ix,iz,t),ix,iz,tri:t,x:tx,z:tz,vertices,neighbors:[]};
@@ -148,11 +156,15 @@ function bridgeClear(ax,az,bx,bz){
  return true;
 }
 function nearestWalkableTriangle(polygons,x,z,maxDistance=7){
- let nearest=null,best=Infinity;
- for(const poly of polygons.values()){
-  if(triangleContainsPoint(poly,x,z))return poly;
-  const d=Math.hypot(poly.x-x,poly.z-z);
-  if(d<best&&d<=maxDistance){best=d;nearest=poly}
+ const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
+ const radius=Math.ceil(maxDistance/NAV_TRI_CELL)+1;let nearest=null,bestSq=maxDistance*maxDistance;
+ for(let dz=-radius;dz<=radius;dz++)for(let dx=-radius;dx<=radius;dx++){
+  const base=ix+dx+','+(iz+dz)+',';
+  for(let t=0;t<2;t++){const poly=polygons.get(base+t);if(!poly)continue;
+   if(triangleContainsPoint(poly,x,z))return poly;
+   const ddx=poly.x-x,ddz=poly.z-z,d2=ddx*ddx+ddz*ddz;
+   if(d2<bestSq){bestSq=d2;nearest=poly}
+  }
  }
  return nearest;
 }
