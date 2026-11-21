@@ -176,18 +176,20 @@ function bridgeClear(ax,az,bx,bz){
  for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t))return false}
  return true;
 }
-function triangleHeightAt(poly,x,z){const [a,b,c]=poly.vertices;const den=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);if(Math.abs(den)<1e-8)return poly.y;const u=((b.z-c.z)*(x-c.x)+(c.x-b.x)*(z-c.z))/den,v=((c.z-a.z)*(x-c.x)+(a.x-c.x)*(z-c.z))/den,w=1-u-v;return u*a.y+v*b.y+w*c.y}\nfunction nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
+function triangleHeightAt(poly,x,z){const [a,b,c]=poly.vertices;const den=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);if(Math.abs(den)<1e-8)return poly.y;const u=((b.z-c.z)*(x-c.x)+(c.x-b.x)*(z-c.z))/den,v=((c.z-a.z)*(x-c.x)+(a.x-c.x)*(z-c.z))/den,w=1-u-v;return u*a.y+v*b.y+w*c.y}
+function nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
  const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
  const radius=Math.ceil(maxDistance/NAV_TRI_CELL)+1;let nearest=null,bestSq=maxDistance*maxDistance;
  for(let dz=-radius;dz<=radius;dz++)for(let dx=-radius;dx<=radius;dx++){
   const base=ix+dx+','+(iz+dz)+',';
   for(let t=0;t<2;t++){const poly=polygons.get(base+t);if(!poly)continue;
-   if(triangleContainsPoint(poly,x,z)&&Math.abs(poly.y-y)<1.4)return poly;
+   // Defer the ground hit until elevated tower polygons have been checked.
    const ddx=poly.x-x,ddz=poly.z-z,ddy=poly.y-y,d2=ddx*ddx+ddz*ddz+ddy*ddy*1.8;
    if(d2<bestSq){bestSq=d2;nearest=poly}
   }
  }
- for(const poly of towerNavPolygons){if(triangleContainsPoint(poly,x,z)&&Math.abs(poly.y-y)<2.2)return poly;const dx=poly.x-x,dz=poly.z-z,dy=poly.y-y,d2=dx*dx+dz*dz+dy*dy*1.8;if(d2<bestSq){bestSq=d2;nearest=poly}}\n return nearest;
+ for(const poly of towerNavPolygons){if(triangleContainsPoint(poly,x,z)&&Math.abs(poly.y-y)<2.2)return poly;const dx=poly.x-x,dz=poly.z-z,dy=poly.y-y,d2=dx*dx+dz*dz+dy*dy*1.8;if(d2<bestSq){bestSq=d2;nearest=poly}}
+ return nearest;
 }
 function triangleRoute(start,goal){
  if(!start||!goal)return null;
@@ -322,7 +324,8 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  const playerSurface=nearestWalkableTriangle(buildGlobalPolygonDebug(),p.x,p.z,3,p.y-2);if(playerSurface){const h=triangleHeightAt(playerSurface,p.x,p.z);if(Number.isFinite(h))p.y=THREE.MathUtils.damp(p.y,h+2,12,dt)}\n  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
+  const playerSurface=nearestWalkableTriangle(buildGlobalPolygonDebug(),p.x,p.z,3,p.y-2);if(playerSurface){const h=triangleHeightAt(playerSurface,p.x,p.z);if(Number.isFinite(h))p.y=THREE.MathUtils.damp(p.y,h+2,12,dt)}
+  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s · Towers '+generatedTowerCount;
   document.querySelector('#bar').style.width=player.hp+'%';
