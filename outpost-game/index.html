@@ -29,14 +29,14 @@ function createFireTower(cx,cz,items){
  const add=o=>{scene.add(o);items.push(o);return o},beam=(x,y,z,sx,sy,sz,m=wood)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);return add(o)};
  for(const sx of [-1,1])for(const sz of [-1,1])beam(gx+sx*half,H*.48,gz+sz*half,.42,H*.98,.42,dark);
  for(const y of [3,6,9]){beam(gx,y,gz-half,6.7,.22,.25);beam(gx,y,gz+half,6.7,.22,.25);beam(gx-half,y,gz,.25,.22,6.7);beam(gx+half,y,gz,.25,.22,6.7)}
- const deck=beam(gx,H,gz,8,.35,8),landing=beam(gx+4,6,gz,3,.28,3);
+ const deck=beam(gx,H,gz-1.5,8,.35,11),landing=beam(gx+4,6,gz,3,.28,3);
  for(const side of [-1,1]){beam(gx+side*3.75,H+.65,gz,.13,1.3,8,metal);beam(gx,H+.65,gz+side*3.75,8,1.3,.13,metal)}
  beam(gx,H+1.75,gz-1.05,4.2,3.1,3.8,dark);beam(gx,H+3.45,gz-1.05,4.8,.25,4.4,dark);
- const flights=[{x:gx+4,z0:gz+5.5,z1:gz-1.5,y0:0,y1:6,tag:'lower'},{x:gx+2,z0:gz-1.5,z1:gz-6.5,y0:6,y1:12,tag:'upper'}];
+ const flights=[{x:gx+4,z0:gz+5.5,z1:gz-1.5,y0:0,y1:6,tag:'lower'},{x:gx+4,z0:gz-1.5,z1:gz-6.5,y0:6,y1:12,tag:'upper'}];
  for(const fl of flights){const n=12,dz=(fl.z1-fl.z0)/n,dy=(fl.y1-fl.y0)/n;for(let i=0;i<n;i++){const tread=beam(fl.x,fl.y0+(i+1)*dy,fl.z0+(i+.5)*dz,2.35,.16,Math.abs(dz)+.08);tread.rotation.x=-Math.atan2(dy,Math.abs(dz))}
  addTowerQuad({x:fl.x-1.2,y:fl.y0,z:fl.z0},{x:fl.x+1.2,y:fl.y0,z:fl.z0},{x:fl.x+1.2,y:fl.y1,z:fl.z1},{x:fl.x-1.2,y:fl.y1,z:fl.z1},fl.tag)}
  addTowerQuad({x:gx+2.8,y:6,z:gz-1.5},{x:gx+5.2,y:6,z:gz-1.5},{x:gx+5.2,y:6,z:gz+1.5},{x:gx+2.8,y:6,z:gz+1.5},'landing');
- addTowerQuad({x:gx-4,y:12,z:gz-4},{x:gx+4,y:12,z:gz-4},{x:gx+4,y:12,z:gz+4},{x:gx-4,y:12,z:gz+4},'deck');generatedTowerCount++;
+ addTowerQuad({x:gx-4,y:12,z:gz-7},{x:gx+4,y:12,z:gz-7},{x:gx+4,y:12,z:gz+4},{x:gx-4,y:12,z:gz+4},'deck');generatedTowerCount++;
 }
 function makeChunk(cx,cz){const key=cx+','+cz;if(chunkMap.has(key))return;const items=[],obs=[];let local=(Math.imul(cx+7919,374761393)^Math.imul(cz+104729,668265263))>>>0;function cr(){local=(local*1664525+1013904223)>>>0;return local/4294967296}
 const groundTile=new THREE.Mesh(chunkGroundGeometry,chunkGroundMaterial);groundTile.rotation.x=-Math.PI/2;groundTile.position.set(cx*CHUNK,-.025,cz*CHUNK);groundTile.receiveShadow=true;scene.add(groundTile);items.push(groundTile);
@@ -153,7 +153,7 @@ function buildGlobalPolygonDebug(){
   }
  }
  // Only triangles sharing a complete edge are connected.
- for(const p of towerNavPolygons){polygons.set(p.key,p);for(let e=0;e<3;e++){const a=p.vertices[e],b=p.vertices[(e+1)%3],ak=a.x+','+a.y+','+a.z,bk=b.x+','+b.y+','+b.z,edge=ak<bk?ak+'|'+bk:bk+'|'+ak,list=edges.get(edge)||[];list.push(p);edges.set(edge,list)}}for(const list of edges.values())if(list.length===2){list[0].neighbors.push(list[1]);list[1].neighbors.push(list[0])}
+ for(const p of towerNavPolygons){polygons.set(p.key,p);for(let e=0;e<3;e++){const a=p.vertices[e],b=p.vertices[(e+1)%3],ak=a.x+','+a.y+','+a.z,bk=b.x+','+b.y+','+b.z,edge=ak<bk?ak+'|'+bk:bk+'|'+ak,list=edges.get(edge)||[];list.push(p);edges.set(edge,list)}}for(const list of edges.values())if(list.length===2){list[0].neighbors.push(list[1]);list[1].neighbors.push(list[0])}for(const p of towerNavPolygons){if(!p.vertices.some(v=>Math.abs(v.y)<1e-5))continue;let best=null,bd=3.4;for(const q of polygons.values()){if(q===p||q.key.startsWith('tower:')||Math.abs(q.y)>.05)continue;const d=Math.hypot(q.x-p.x,q.z-p.z);if(d<bd){bd=d;best=q}}if(best){p.neighbors.push(best);best.neighbors.push(p)}}
  globalPolygonDebugCache=polygons;return polygons;
 }
 let navDebugRendered=false,navDebugDrawnSignature='';
@@ -176,7 +176,7 @@ function bridgeClear(ax,az,bx,bz){
  for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t))return false}
  return true;
 }
-function nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
+function triangleHeightAt(poly,x,z){const [a,b,c]=poly.vertices;const den=(b.z-c.z)*(a.x-c.x)+(c.x-b.x)*(a.z-c.z);if(Math.abs(den)<1e-8)return poly.y;const u=((b.z-c.z)*(x-c.x)+(c.x-b.x)*(z-c.z))/den,v=((c.z-a.z)*(x-c.x)+(a.x-c.x)*(z-c.z))/den,w=1-u-v;return u*a.y+v*b.y+w*c.y}\nfunction nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
  const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
  const radius=Math.ceil(maxDistance/NAV_TRI_CELL)+1;let nearest=null,bestSq=maxDistance*maxDistance;
  for(let dz=-radius;dz<=radius;dz++)for(let dx=-radius;dx<=radius;dx++){
@@ -187,7 +187,7 @@ function nearestWalkableTriangle(polygons,x,z,maxDistance=7,y=0){
    if(d2<bestSq){bestSq=d2;nearest=poly}
   }
  }
- return nearest;
+ for(const poly of towerNavPolygons){if(triangleContainsPoint(poly,x,z)&&Math.abs(poly.y-y)<2.2)return poly;const dx=poly.x-x,dz=poly.z-z,dy=poly.y-y,d2=dx*dx+dz*dz+dy*dy*1.8;if(d2<bestSq){bestSq=d2;nearest=poly}}\n return nearest;
 }
 function triangleRoute(start,goal){
  if(!start||!goal)return null;
@@ -228,7 +228,7 @@ function triangleNavMove(actor,goal,dt,speed,portalOnly=false){
    for(const a of prev.vertices)for(const b of next.vertices)if(Math.abs(a.x-b.x)<1e-5&&Math.abs(a.z-b.z)<1e-5)shared.push(a);
    if(shared.length>=2)waypoints.push({x:(shared[0].x+shared[1].x)*.5,y:(shared[0].y+shared[1].y)*.5,z:(shared[0].z+shared[1].z)*.5});
    else if(!portalOnly)waypoints.push({x:next.x,z:next.z});
-   else return; // Rake never falls back to triangle-centroid steering.
+   else waypoints.push({x:next.x,y:next.y,z:next.z});
   }
   waypoints.push({x:goal.x,y:goal.y??target.y,z:goal.z});
   if(!waypoints.length)waypoints.push({x:goal.x,z:goal.z});
@@ -271,7 +271,7 @@ function updateRakeHeadLook(dt){
 }function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
  else{
-  const living=survivors.filter(a=>a.hp>0&&a.mesh.visible),entities=[{entity:p,x:p.x,z:p.z,isPlayer:true},...living.map(a=>({entity:a,x:a.x,z:a.z,isPlayer:false}))];
+  const living=survivors.filter(a=>a.hp>0&&a.mesh.visible),entities=[{entity:p,x:p.x,y:p.y-2,z:p.z,isPlayer:true},...living.map(a=>({entity:a,x:a.x,y:a.y,z:a.z,isPlayer:false}))];
   if(elapsed>=aiCheckAt){
    const moved=entities.map(e=>{const prev=aiPositions.get(e.entity),movement=prev?Math.hypot(e.x-prev.x,e.z-prev.z):0;aiPositions.set(e.entity,{x:e.x,z:e.z});return {...e,movement}}).filter(e=>e.movement>.15);
    aiCheckAt=elapsed+11;
@@ -287,11 +287,11 @@ function updateRakeHeadLook(dt){
   // A chase target is valid only while within 45 units. Losing it clears chase
   // state immediately and falls through to investigation/patrol instead.
   const target=entities.find(e=>e.entity===chaseTarget&&Math.hypot(e.x-monster.position.x,e.z-monster.position.z)<=45)||null;
-  if(target){const td=Math.hypot(target.x-monster.position.x,target.z-monster.position.z);if(td<2.2){enemyState='attack';goal={x:target.x,z:target.z};enemySpeed=0}else{enemyState=target.isPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=td<4?6.8:5.8}}
+  if(target){const td=Math.hypot(target.x-monster.position.x,target.z-monster.position.z);if(td<2.2){enemyState='attack';goal={x:target.x,y:target.y,z:target.z};enemySpeed=0}else{enemyState=target.isPlayer?'hunt-player':'hunt-survivor';goal={x:target.x,z:target.z};enemySpeed=td<4?6.8:5.8}}
   else{
    chaseTarget=null;
-   if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,z:noisePos.z};enemySpeed=4.8}
-   else{enemyState='patrol-movement-cells';enemySpeed=3.7;const patrol=entities.find(e=>e.entity===patrolTarget)||entities.slice().sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z))[0];if(!monster.patrolGoal||monster.patrolTargetRef!==patrol.entity||elapsed>=(monster.patrolGoalAt||0)||Math.hypot(monster.patrolGoal.x-monster.position.x,monster.patrolGoal.z-monster.position.z)<3){monster.patrolTargetRef=patrol.entity;monster.patrolGoal={x:patrol.x,z:patrol.z};monster.patrolGoalAt=elapsed+5}goal=monster.patrolGoal}
+   if(elapsed-lastNoise<12&&Math.hypot(noisePos.x-monster.position.x,noisePos.z-monster.position.z)<35){enemyState='investigate';goal={x:noisePos.x,y:0,z:noisePos.z};enemySpeed=4.8}
+   else{enemyState='patrol-movement-cells';enemySpeed=3.7;const patrol=entities.find(e=>e.entity===patrolTarget)||entities.slice().sort((a,b)=>Math.hypot(a.x-monster.position.x,a.z-monster.position.z)-Math.hypot(b.x-monster.position.x,b.z-monster.position.z))[0];if(!monster.patrolGoal||monster.patrolTargetRef!==patrol.entity||elapsed>=(monster.patrolGoalAt||0)||Math.hypot(monster.patrolGoal.x-monster.position.x,monster.patrolGoal.z-monster.position.z)<3){monster.patrolTargetRef=patrol.entity;monster.patrolGoal={x:patrol.x,y:patrol.y??0,z:patrol.z};monster.patrolGoalAt=elapsed+5}goal=monster.patrolGoal}
   }
  }
  if(elapsed<rakeSlowUntil)enemySpeed*=.48;
@@ -322,7 +322,7 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
+  const playerSurface=nearestWalkableTriangle(buildGlobalPolygonDebug(),p.x,p.z,3,p.y-2);if(playerSurface){const h=triangleHeightAt(playerSurface,p.x,p.z);if(Number.isFinite(h))p.y=THREE.MathUtils.damp(p.y,h+2,12,dt)}\n  updateSurvivors(dt);moveEnemy(dt);drawNavDebug();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s · Towers '+generatedTowerCount;
   document.querySelector('#bar').style.width=player.hp+'%';
