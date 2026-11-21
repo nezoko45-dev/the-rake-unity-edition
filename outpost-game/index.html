@@ -66,6 +66,7 @@ const NAV_TRI_CELL=1.5;
 let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
 let navDebug=false;
 const navDebugGroup=new THREE.Group();scene.add(navDebugGroup);
+addEventListener('keydown',e=>{if(e.code==='KeyG'&&!e.repeat){navDebug=!navDebug;notice('Triangle navmesh '+(navDebug?'ON':'OFF'))}});
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+.8)}
 function triangleContainsPoint(poly,x,z){
  const [a,b,c]=poly.vertices;
@@ -81,7 +82,7 @@ function pointSegmentDistanceSq(px,pz,a,b){
  const x=a.x+dx*t,z=a.z+dz*t;return(px-x)*(px-x)+(pz-z)*(pz-z);
 }
 function triangleTouchesObstacle(vertices,o){
- const radius=o.r+.62,r2=radius*radius;
+ const radius=o.r+.8,r2=radius*radius;
  if(triangleContainsPoint({vertices},o.x,o.z))return true;
  for(let i=0;i<3;i++){
   const a=vertices[i],b=vertices[(i+1)%3];
