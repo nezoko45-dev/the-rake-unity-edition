@@ -306,7 +306,7 @@ const clock=new THREE.Clock();function tick(){
    if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
-  updateSurvivors(dt);moveEnemy(dt);setHuntMusic(isNight&&rakeSeesPlayerInFov());drawNavDebug();
+  updateSurvivors(dt);moveEnemy(dt);setHuntMusic(rakeSeesPlayerInFov());drawNavDebug();
   if(headBone&&headBone.userData.trackApplied){headBone.quaternion.multiply(headBone.userData.trackApplied.clone().invert());headBone.userData.trackApplied=null}if(mixer)mixer.update(dt);updateRakeHeadLook(dt);
   document.querySelector('#stats').textContent='HP '+player.hp+' · Freeplay · '+Math.floor(elapsed)+'s';
   document.querySelector('#bar').style.width=player.hp+'%';
