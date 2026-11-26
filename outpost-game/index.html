@@ -291,7 +291,6 @@ function updateRakeHeadLook(dt){
   return nearest;
  };
  const minClearance=obstacles.reduce((best,o)=>Math.min(best,Math.hypot(x-o.x,z-o.z)-(o.r+.8)),Infinity);
- const rearClearance=rayDistance(rear,2.5);
  const movedSinceCheck=Math.hypot(x-actor.lastX,z-actor.lastZ);
  if(movedSinceCheck<.025)actor.stuckFor+=dt;else actor.stuckFor=0;
  actor.lastX=x;actor.lastZ=z;
@@ -305,13 +304,8 @@ function updateRakeHeadLook(dt){
  const scanRange=rayDistance(scanDir,8);
 
  // Reverse only when the Rake is within 0.9 units of an obstacle's collision edge.
- if(!actor.reversing&&minClearance<=.9&&rearClearance>.35&&elapsed>=actor.retryAt){
-  actor.reversing=true;actor.reverseUntil=elapsed+.42;
-  actor.avoidStartX=x;actor.avoidStartZ=z;
-  actor.stuckFor=0;actor.retryAt=elapsed+.65;
- }
- if(actor.reversing&&elapsed>=actor.reverseUntil)actor.reversing=false;
- if(!actor.reversing){
+ actor.reversing=false;
+ {
   // Default steering always points at the active target. Only a ray hit in
   // the target-facing corridor is allowed to temporarily deflect that heading.
   if(!actor.avoiding&&scanRange<3.2&&scanDir.dot(toGoal)>.45){
@@ -333,18 +327,18 @@ function updateRakeHeadLook(dt){
    if(movedAround>1.35&&targetRouteClear){actor.avoiding=false;actor.dir.copy(toGoal)}
   }else actor.dir.copy(toGoal);
  }
- const steeringMode=actor.reversing?'reverse':actor.avoiding?'avoid':'chase';
- const steeringDir=actor.reversing?rear:actor.dir;
+ const steeringMode=actor.avoiding?'avoid':'chase';
+ const steeringDir=actor.dir;
  updateRakeRayGizmo(scanDir,steeringDir,steeringMode);
  // Rotate the body toward the target, or a short-lived ray-selected escape
  // heading, before moving. Never chase along the ray's sweep direction.
- const desiredYaw=actor.reversing?Math.atan2(front.x,front.y):Math.atan2(actor.dir.x,actor.dir.y);
+ const desiredYaw=Math.atan2(actor.dir.x,actor.dir.y);
  let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*dt);
  delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  if(Math.abs(delta)>.06)return 0;
  monster.rotation.y+=delta;
- const moveDir=actor.reversing?rear:forwardSensor();
+ const moveDir=forwardSensor();
  const step=speed*dt,nx=x+moveDir.x*step,nz=z+moveDir.y*step;
  if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){monster.position.x=nx;monster.position.z=nz}
  else{actor.stuckFor=Math.max(actor.stuckFor,.4)}
