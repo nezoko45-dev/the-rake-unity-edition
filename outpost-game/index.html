@@ -237,47 +237,51 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,avoidStartX:monster.position.x,avoidStartZ:monster.position.z});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,avoidStartX:monster.position.x,avoidStartZ:monster.position.z,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0});
  const x=monster.position.x,z=monster.position.z;
  const toGoal=new THREE.Vector2(goal.x-x,goal.z-z);
  if(toGoal.lengthSq()<.01)return 0;
  toGoal.normalize();
- const probe=(dir,distance)=>{const steps=Math.max(3,Math.ceil(distance/.25));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(x+dir.x*distance*t,z+dir.y*distance*t))return false}return true};
- // Enter a committed avoidance maneuver as soon as the route toward the target
- // is obstructed. Do not overwrite this heading with the target direction.
- if(!actor.avoiding&&!probe(toGoal,4.8)){
-  const candidates=[];
-  for(let i=0;i<24;i++){
-   const angle=i*Math.PI*2/24,dir=new THREE.Vector2(Math.sin(angle),Math.cos(angle));
-   if(!probe(dir,3.6))continue;
+ const probe=(dir,distance)=>{const steps=Math.max(2,Math.ceil(distance/.2));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(x+dir.x*distance*t,z+dir.y*distance*t))return false}return true};
+ const goalBlocked=!probe(toGoal,3.8);
+ const currentBlocked=!probe(actor.dir,1.0);
+ const movedSinceCheck=Math.hypot(x-actor.lastX,z-actor.lastZ);
+ if(movedSinceCheck<.025)actor.stuckFor+=dt;else actor.stuckFor=0;
+ actor.lastX=x;actor.lastZ=z;
+ // Re-scan whenever the target route is blocked, the current escape heading
+ // runs into another tree, or movement has stalled. This prevents a stale
+ // avoidance vector from trapping the Rake between several trees.
+ const needScan=(!actor.avoiding&&goalBlocked)||(actor.avoiding&&(currentBlocked||actor.stuckFor>.45))||(!actor.avoiding&&currentBlocked);
+ if(needScan&&elapsed>=actor.retryAt){
+  let best=null;
+  for(let i=0;i<32;i++){
+   const angle=i*Math.PI*2/32,dir=new THREE.Vector2(Math.sin(angle),Math.cos(angle));
+   const clear=[.55,1.1,1.8,2.7,3.8,5.2].filter(d=>probe(dir,d)).length;
+   if(clear===0)continue;
    const alignment=dir.dot(toGoal);
-   const clearance=[2,3.5,5.5,7].filter(d=>probe(dir,d)).length;
-   candidates.push({dir,score:alignment*2.0+clearance*.55+rand()*.06});
+   const score=clear*1.25+alignment*1.15+rand()*.035;
+   if(!best||score>best.score)best={dir,score,clear};
   }
-  candidates.sort((a,b)=>b.score-a.score);
-  if(candidates.length){
-   actor.dir.copy(candidates[0].dir);
+  if(best){
+   actor.dir.copy(best.dir);
    actor.avoiding=true;
    actor.avoidStartX=x;actor.avoidStartZ=z;
+   actor.stuckFor=0;actor.retryAt=elapsed+.28;
   }else{
-   // No clear route yet: remain stopped and rotate to search again next frame.
-   actor.dir.set(-toGoal.x,-toGoal.y);
-   actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
+   // Fully boxed in: stop, rotate through a new scan on a short retry interval.
+   actor.avoiding=true;
+   actor.dir.set(Math.sin(monster.rotation.y+Math.PI*.65),Math.cos(monster.rotation.y+Math.PI*.65));
+   actor.stuckFor=0;actor.retryAt=elapsed+.35;
+   return 0;
   }
  }
  if(actor.avoiding){
   const traveled=Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ);
-  // Only release the avoidance heading after physically clearing the obstacle.
-  if(traveled>2.8&&probe(toGoal,4.0)&&probe(actor.dir,1.8)){
-   actor.avoiding=false;
-   actor.dir.copy(toGoal);
+  if(traveled>3.0&&!goalBlocked&&!currentBlocked){
+   actor.avoiding=false;actor.dir.copy(toGoal);
   }
- }else{
-  // In open space, face the target directly.
-  actor.dir.copy(toGoal);
- }
- // Rotate in place first. Translation is forbidden until the body faces the
- // committed heading, and the heading stays locked throughout the bypass.
+ }else actor.dir.copy(toGoal);
+ // Turn in place until facing the selected escape vector.
  const desiredYaw=Math.atan2(actor.dir.x,actor.dir.y);
  let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  const maxTurn=3.4*dt;
@@ -288,9 +292,12 @@ function updateRakeHeadLook(dt){
  const step=speed*dt,nx=x+actor.dir.x*step,nz=z+actor.dir.y*step;
  if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){
   monster.position.x=nx;monster.position.z=nz;
+ }else{
+  actor.stuckFor=Math.max(actor.stuckFor,.46);
+  actor.retryAt=Math.min(actor.retryAt,elapsed);
  }
- const moved=Math.hypot(monster.position.x-x,monster.position.z-z);
- return moved/Math.max(dt,.001);
+ const actual=Math.hypot(monster.position.x-x,monster.position.z-z);
+ return actual/Math.max(dt,.001);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
