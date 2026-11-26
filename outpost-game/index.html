@@ -308,23 +308,30 @@ function updateRakeHeadLook(dt){
  {
   // Default steering always points at the active target. Only a ray hit in
   // the target-facing corridor is allowed to temporarily deflect that heading.
-  if(!actor.avoiding&&scanRange<3.2&&scanDir.dot(toGoal)>.45){
-   const sideA=toGoal.clone().rotateAround(new THREE.Vector2(),.78);
-   const sideB=toGoal.clone().rotateAround(new THREE.Vector2(),-.78);
-   const clearA=rayDistance(sideA,4.5),clearB=rayDistance(sideB,4.5);
-   const scoreA=clearA+sideA.dot(toGoal)*1.8;
-   const scoreB=clearB+sideB.dot(toGoal)*1.8;
+  // React early when the spinning ray sees an obstacle anywhere in the
+  // forward half of the chase corridor. The 6.5-unit look-ahead gives the
+  // Rake time to turn before reaching the collision boundary.
+  const raySeesForwardObstacle=scanRange<6.5&&scanDir.dot(toGoal)>.12;
+  const targetLaneBlocked=rayDistance(toGoal,6.5)<6.5;
+  if(!actor.avoiding&&(raySeesForwardObstacle||targetLaneBlocked)){
+   const sideA=toGoal.clone().rotateAround(new THREE.Vector2(),1.05);
+   const sideB=toGoal.clone().rotateAround(new THREE.Vector2(),-1.05);
+   const clearA=rayDistance(sideA,6.5),clearB=rayDistance(sideB,6.5);
+   const probeA=probe(sideA,Math.min(4.2,clearA));
+   const probeB=probe(sideB,Math.min(4.2,clearB));
+   const scoreA=(probeA?clearA:-100)+sideA.dot(toGoal)*1.35;
+   const scoreB=(probeB?clearB:-100)+sideB.dot(toGoal)*1.35;
    const chosen=scoreA>=scoreB?sideA:sideB;
-   const chosenClearance=Math.max(clearA,clearB);
-   if(chosenClearance>1.15&&probe(chosen,Math.min(3.2,chosenClearance))){
+   const chosenClearance=Math.max(probeA?clearA:0,probeB?clearB:0);
+   if(chosenClearance>1.05){
     actor.dir.copy(chosen);actor.avoiding=true;
     actor.avoidStartX=x;actor.avoidStartZ=z;
    }
   }
   if(actor.avoiding){
    const movedAround=Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ);
-   const targetRouteClear=probe(toGoal,3.6);
-   if(movedAround>1.35&&targetRouteClear){actor.avoiding=false;actor.dir.copy(toGoal)}
+   const targetRouteClear=probe(toGoal,5.2)&&rayDistance(toGoal,5.2)>=5.2;
+   if(movedAround>2.1&&targetRouteClear){actor.avoiding=false;actor.dir.copy(toGoal)}
   }else actor.dir.copy(toGoal);
  }
  const steeringMode=actor.avoiding?'avoid':'chase';
