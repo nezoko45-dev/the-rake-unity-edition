@@ -69,39 +69,26 @@ const NAV_TRI_CELL=1.5;
 let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
 
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+.8)}
-let rakeRayGizmo=null;
-function updateRakeRayGizmo(dir,steerDir,steeringMode='chase'){
+let rakeTrailGizmo=null;
+function updateRakeTrailGizmo(points,mode='direct'){
  if(!monster)return;
- const maxRange=8,originX=monster.position.x,originZ=monster.position.z;
- let hitDistance=maxRange,hit=false;
- for(const o of obstacles){
-  const ox=o.x-originX,oz=o.z-originZ,along=ox*dir.x+oz*dir.y;
-  if(along<0||along>hitDistance)continue;
-  const perpendicularSq=ox*ox+oz*oz-along*along,radius=o.r+.8;
-  if(perpendicularSq>radius*radius)continue;
-  const near=along-Math.sqrt(Math.max(0,radius*radius-perpendicularSq));
-  if(near>=0&&near<hitDistance){hitDistance=near;hit=true}
+ if(!rakeTrailGizmo){
+  const geometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3()]);
+  const material=new THREE.LineBasicMaterial({color:0x36cfff,transparent:true,opacity:.95,depthTest:false});
+  const line=new THREE.Line(geometry,material);line.renderOrder=22;scene.add(line);
+  const marker=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),new THREE.MeshBasicMaterial({color:0x45f5b0,depthTest:false}));
+  marker.renderOrder=23;scene.add(marker);
+  rakeTrailGizmo={line,marker};
  }
- if(!rakeRayGizmo){
-  const makeLine=(color,opacity)=>{const geometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const material=new THREE.LineBasicMaterial({color,transparent:true,opacity,depthTest:false});const line=new THREE.Line(geometry,material);line.renderOrder=20;scene.add(line);return line};
-  const makeTip=color=>{const tip=new THREE.Mesh(new THREE.SphereGeometry(.15,10,8),new THREE.MeshBasicMaterial({color,depthTest:false}));tip.renderOrder=21;scene.add(tip);return tip};
-  rakeRayGizmo={line:makeLine(0x45f5b0,.95),tip:makeTip(0x45f5b0),steerLine:makeLine(0x36cfff,1),steerTip:makeTip(0x36cfff)};
- }
- const y=monster.position.y+1.05,start=new THREE.Vector3(originX,y,originZ);
- const end=new THREE.Vector3(originX+dir.x*hitDistance,y,originZ+dir.y*hitDistance);
- const positions=rakeRayGizmo.line.geometry.attributes.position;
- positions.setXYZ(0,start.x,start.y,start.z);positions.setXYZ(1,end.x,end.y,end.z);
- positions.needsUpdate=true;rakeRayGizmo.line.geometry.computeBoundingSphere();
- const rayColor=hit?0xff3030:0x45f5b0;
- rakeRayGizmo.line.material.color.setHex(rayColor);rakeRayGizmo.tip.material.color.setHex(rayColor);rakeRayGizmo.tip.position.copy(end);
- const steerColor=steeringMode==='avoid'?0xffa126:steeringMode==='reverse'?0xc084fc:0x36cfff;
- const steerEnd=new THREE.Vector3(originX+steerDir.x*3.4,y+.08,originZ+steerDir.y*3.4);
- const steerPositions=rakeRayGizmo.steerLine.geometry.attributes.position;
- steerPositions.setXYZ(0,start.x,start.y+.08,start.z);steerPositions.setXYZ(1,steerEnd.x,steerEnd.y,steerEnd.z);
- steerPositions.needsUpdate=true;rakeRayGizmo.steerLine.geometry.computeBoundingSphere();
- rakeRayGizmo.steerLine.material.color.setHex(steerColor);rakeRayGizmo.steerTip.material.color.setHex(steerColor);rakeRayGizmo.steerTip.position.copy(steerEnd);
+ const y=monster.position.y+.16;
+ const pts=[new THREE.Vector3(monster.position.x,y,monster.position.z),...points.map(p=>new THREE.Vector3(p.x,y,p.z))];
+ while(pts.length<3)pts.push(pts[pts.length-1].clone());
+ const geometry=new THREE.BufferGeometry().setFromPoints(pts);
+ rakeTrailGizmo.line.geometry.dispose();rakeTrailGizmo.line.geometry=geometry;
+ const color=mode==='avoid'?0x45f5b0:mode==='blocked'?0xff4545:0x36cfff;
+ rakeTrailGizmo.line.material.color.setHex(color);rakeTrailGizmo.marker.material.color.setHex(mode==='avoid'?0xffb02e:color);
+ rakeTrailGizmo.marker.position.copy(pts[1]);
 }
-
 function triangleContainsPoint(poly,x,z){
  const [a,b,c]=poly.vertices;
  const v0x=c.x-a.x,v0z=c.z-a.z,v1x=b.x-a.x,v1z=b.z-a.z,v2x=x-a.x,v2z=z-a.z;
@@ -270,85 +257,68 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,avoidStartX:monster.position.x,avoidStartZ:monster.position.z,reversing:false,reverseUntil:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0,scanYaw:monster.rotation.y,scanSign:1,scanProgress:0,lastState:''});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,trailWaypoint:null,trailGoalX:0,trailGoalZ:0});
  const x=monster.position.x,z=monster.position.z;
  const toGoal=new THREE.Vector2(goal.x-x,goal.z-z);
  if(toGoal.lengthSq()<.01)return 0;
  toGoal.normalize();
- const probe=(dir,distance)=>{const steps=Math.max(2,Math.ceil(distance/.2));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(x+dir.x*distance*t,z+dir.y*distance*t))return false}return true};
- const forwardSensor=()=>new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y));
- const front=forwardSensor(),rear=front.clone().multiplyScalar(-1);
- const rayDistance=(dir,maxRange=8)=>{
-  let nearest=maxRange;
+ const clearSegment=(ax,az,bx,bz)=>{
   for(const o of obstacles){
-   const ox=o.x-x,oz=o.z-z,along=ox*dir.x+oz*dir.y;
-   if(along<0||along>nearest)continue;
-   const radius=o.r+.8,perpSq=ox*ox+oz*oz-along*along;
-   if(perpSq>radius*radius)continue;
-   const hit=along-Math.sqrt(Math.max(0,radius*radius-perpSq));
-   if(hit>=0&&hit<nearest)nearest=hit;
+   const dx=bx-ax,dz=bz-az,l2=dx*dx+dz*dz;
+   const t=l2>1e-8?THREE.MathUtils.clamp(((o.x-ax)*dx+(o.z-az)*dz)/l2,0,1):0;
+   const px=ax+dx*t,pz=az+dz*t;
+   if(Math.hypot(o.x-px,o.z-pz)<o.r+.8)return false;
   }
-  return nearest;
+  return true;
  };
- const minClearance=obstacles.reduce((best,o)=>Math.min(best,Math.hypot(x-o.x,z-o.z)-(o.r+.8)),Infinity);
- const movedSinceCheck=Math.hypot(x-actor.lastX,z-actor.lastZ);
- if(movedSinceCheck<.025)actor.stuckFor+=dt;else actor.stuckFor=0;
- actor.lastX=x;actor.lastZ=z;
- actor.lastState=enemyState;
- // The single ray continuously sweeps 360 degrees, reversing sweep direction
- // each revolution. It is a proximity/avoidance sensor, never the chase heading.
- actor.scanYaw+=actor.scanSign*2.35*dt;
- actor.scanProgress+=2.35*dt;
- if(actor.scanProgress>=Math.PI*2){actor.scanProgress-=Math.PI*2;actor.scanSign*=-1}
- const scanDir=new THREE.Vector2(Math.sin(actor.scanYaw),Math.cos(actor.scanYaw));
- const scanRange=rayDistance(scanDir,8);
-
- // Reverse only when the Rake is within 0.9 units of an obstacle's collision edge.
- actor.reversing=false;
- {
-  // Default steering always points at the active target. Only a ray hit in
-  // the target-facing corridor is allowed to temporarily deflect that heading.
-  // React early when the spinning ray sees an obstacle anywhere in the
-  // forward half of the chase corridor. The 6.5-unit look-ahead gives the
-  // Rake time to turn before reaching the collision boundary.
-  const raySeesForwardObstacle=scanRange<6.5&&scanDir.dot(toGoal)>.12;
-  const targetLaneBlocked=rayDistance(toGoal,6.5)<6.5;
-  if(!actor.avoiding&&(raySeesForwardObstacle||targetLaneBlocked)){
-   const sideA=toGoal.clone().rotateAround(new THREE.Vector2(),1.05);
-   const sideB=toGoal.clone().rotateAround(new THREE.Vector2(),-1.05);
-   const clearA=rayDistance(sideA,6.5),clearB=rayDistance(sideB,6.5);
-   const probeA=probe(sideA,Math.min(4.2,clearA));
-   const probeB=probe(sideB,Math.min(4.2,clearB));
-   const scoreA=(probeA?clearA:-100)+sideA.dot(toGoal)*1.35;
-   const scoreB=(probeB?clearB:-100)+sideB.dot(toGoal)*1.35;
-   const chosen=scoreA>=scoreB?sideA:sideB;
-   const chosenClearance=Math.max(probeA?clearA:0,probeB?clearB:0);
-   if(chosenClearance>1.05){
-    actor.dir.copy(chosen);actor.avoiding=true;
-    actor.avoidStartX=x;actor.avoidStartZ=z;
+ const directClear=clearSegment(x,z,goal.x,goal.z);
+ let waypoint={x:goal.x,z:goal.z},mode='direct';
+ // Keep a selected waypoint until Rake reaches it; don't let the guide
+ // oscillate between sides while he is moving around the same obstacle.
+ const goalChanged=Math.hypot(goal.x-actor.trailGoalX,goal.z-actor.trailGoalZ)>3;
+ if(directClear){
+  actor.trailWaypoint=null;actor.avoiding=false;
+ }else{
+  if(!actor.trailWaypoint||goalChanged||Math.hypot(x-actor.trailWaypoint.x,z-actor.trailWaypoint.z)<1.15){
+   let hitObstacle=null,hitT=Infinity;
+   const gx=goal.x-x,gz=goal.z-z,l2=gx*gx+gz*gz;
+   for(const o of obstacles){
+    const t=THREE.MathUtils.clamp(((o.x-x)*gx+(o.z-z)*gz)/l2,0,1);
+    const px=x+gx*t,pz=z+gz*t;
+    if(Math.hypot(o.x-px,o.z-pz)<o.r+.8&&t<hitT){hitObstacle=o;hitT=t}
    }
+   if(hitObstacle){
+    const radius=hitObstacle.r+.8,perp=new THREE.Vector2(-toGoal.y,toGoal.x);
+    const candidates=[1,-1].map(sign=>({
+     x:hitObstacle.x+toGoal.x*(radius+.9)+perp.x*sign*(radius+1.65),
+     z:hitObstacle.z+toGoal.y*(radius+.9)+perp.y*sign*(radius+1.65)
+    }));
+    const scored=candidates.map(p=>{
+     const first=clearSegment(x,z,p.x,p.z),second=clearSegment(p.x,p.z,goal.x,goal.z);
+     const length=Math.hypot(p.x-x,p.z-z)+Math.hypot(goal.x-p.x,goal.z-p.z);
+     return {p,valid:first&&second,length,first};
+    }).sort((a,b)=>(Number(b.valid)-Number(a.valid))||(Number(b.first)-Number(a.first))||(a.length-b.length));
+    actor.trailWaypoint=scored[0].p;
+   }else actor.trailWaypoint={x:x+toGoal.x*3,z:z+toGoal.y*3};
+   actor.trailGoalX=goal.x;actor.trailGoalZ=goal.z;
   }
-  if(actor.avoiding){
-   const movedAround=Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ);
-   const targetRouteClear=probe(toGoal,5.2)&&rayDistance(toGoal,5.2)>=5.2;
-   if(movedAround>2.1&&targetRouteClear){actor.avoiding=false;actor.dir.copy(toGoal)}
-  }else actor.dir.copy(toGoal);
+  waypoint=actor.trailWaypoint;mode='avoid';
  }
- const steeringMode=actor.avoiding?'avoid':'chase';
- const steeringDir=actor.dir;
- updateRakeRayGizmo(scanDir,steeringDir,steeringMode);
- // Rotate the body toward the target, or a short-lived ray-selected escape
- // heading, before moving. Never chase along the ray's sweep direction.
+ const steering=new THREE.Vector2(waypoint.x-x,waypoint.z-z);
+ if(steering.lengthSq()<.01){steering.copy(toGoal);actor.trailWaypoint=null;mode='direct'}
+ steering.normalize();actor.dir.copy(steering);actor.avoiding=mode==='avoid';
+ updateRakeTrailGizmo(mode==='avoid'?[waypoint,{x:goal.x,z:goal.z}]:[{x:goal.x,z:goal.z}],mode);
+ // Turn the Rake's body toward the next trail point before moving.
  const desiredYaw=Math.atan2(actor.dir.x,actor.dir.y);
  let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*dt);
  delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  if(Math.abs(delta)>.06)return 0;
  monster.rotation.y+=delta;
- const moveDir=forwardSensor();
+ const moveDir=new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y));
  const step=speed*dt,nx=x+moveDir.x*step,nz=z+moveDir.y*step;
  if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){monster.position.x=nx;monster.position.z=nz}
- else{actor.stuckFor=Math.max(actor.stuckFor,.4)}
+ else{actor.stuckFor=Math.max(actor.stuckFor,.4);actor.trailWaypoint=null}
  return Math.hypot(monster.position.x-x,monster.position.z-z)/Math.max(dt,.001);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
