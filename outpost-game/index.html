@@ -73,21 +73,65 @@ let rakeTrailGizmo=null;
 function updateRakeTrailGizmo(points,mode='direct'){
  if(!monster)return;
  if(!rakeTrailGizmo){
-  const geometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3()]);
+  const geometry=new THREE.BufferGeometry();
   const material=new THREE.LineBasicMaterial({color:0x36cfff,transparent:true,opacity:.95,depthTest:false});
   const line=new THREE.Line(geometry,material);line.renderOrder=22;scene.add(line);
-  const marker=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),new THREE.MeshBasicMaterial({color:0x45f5b0,depthTest:false}));
+  const marker=new THREE.Mesh(new THREE.SphereGeometry(.16,10,8),new THREE.MeshBasicMaterial({color:0xffb02e,depthTest:false}));
   marker.renderOrder=23;scene.add(marker);
   rakeTrailGizmo={line,marker};
  }
  const y=monster.position.y+.16;
- const pts=[new THREE.Vector3(monster.position.x,y,monster.position.z),...points.map(p=>new THREE.Vector3(p.x,y,p.z))];
- while(pts.length<3)pts.push(pts[pts.length-1].clone());
- const geometry=new THREE.BufferGeometry().setFromPoints(pts);
+ const raw=[{x:monster.position.x,z:monster.position.z},...points];
+ // Round each route corner into a short continuous arc. Keep the rounded
+ // segment only when every sample remains clear of obstacle collision bounds.
+ const path=[new THREE.Vector3(raw[0].x,y,raw[0].z)];
+ for(let i=1;i<raw.length-1;i++){
+  const prev=raw[i-1],corner=raw[i],next=raw[i+1];
+  const inPoint={x:corner.x+(prev.x-corner.x)*.32,z:corner.z+(prev.z-corner.z)*.32};
+  const outPoint={x:corner.x+(next.x-corner.x)*.32,z:corner.z+(next.z-corner.z)*.32};
+  const arc=[];
+  for(let j=1;j<=6;j++){
+   const t=j/6,u=1-t;
+   arc.push({x:u*u*inPoint.x+2*u*t*corner.x+t*t*outPoint.x,z:u*u*inPoint.z+2*u*t*corner.z+t*t*outPoint.z});
+  }
+  let safe=true,last=path[path.length-1];
+  for(const p of arc){if(!bridgeClear(last.x,last.z,p.x,p.z)){safe=false;break}last=p}
+  if(safe){
+   const first=path[path.length-1];
+   if(Math.hypot(first.x-inPoint.x,first.z-inPoint.z)>.025)path.push(new THREE.Vector3(inPoint.x,y,inPoint.z));
+   for(const p of arc)path.push(new THREE.Vector3(p.x,y,p.z));
+  }else path.push(new THREE.Vector3(corner.x,y,corner.z));
+ }
+ const last=raw[raw.length-1];
+ if(raw.length>1)path.push(new THREE.Vector3(last.x,y,last.z));
+ if(path.length<2)path.push(path[0].clone());
+ const geometry=new THREE.BufferGeometry().setFromPoints(path);
  rakeTrailGizmo.line.geometry.dispose();rakeTrailGizmo.line.geometry=geometry;
  const color=mode==='avoid'?0x45f5b0:mode==='blocked'?0xff4545:0x36cfff;
- rakeTrailGizmo.line.material.color.setHex(color);rakeTrailGizmo.marker.material.color.setHex(mode==='avoid'?0xffb02e:color);
- rakeTrailGizmo.marker.position.copy(pts[1]);
+ rakeTrailGizmo.line.material.color.setHex(color);
+ // Find the closest point on the actual rendered line, then look ahead along
+ // its connected segments. The marker is placed on the line and is the
+ // steering reference Rake reads.
+ let bestDistance=Infinity,bestIndex=0,bestT=0;
+ for(let i=0;i<path.length-1;i++){
+  const a=path[i],b=path[i+1],dx=b.x-a.x,dz=b.z-a.z,l2=dx*dx+dz*dz;
+  const t=l2>1e-8?THREE.MathUtils.clamp(((monster.position.x-a.x)*dx+(monster.position.z-a.z)*dz)/l2,0,1):0;
+  const px=a.x+dx*t,pz=a.z+dz*t,d2=(monster.position.x-px)**2+(monster.position.z-pz)**2;
+  if(d2<bestDistance){bestDistance=d2;bestIndex=i;bestT=t}
+ }
+ let lookX=path[bestIndex].x+(path[bestIndex+1].x-path[bestIndex].x)*bestT;
+ let lookZ=path[bestIndex].z+(path[bestIndex+1].z-path[bestIndex].z)*bestT;
+ let remaining=1.65;
+ for(let i=bestIndex;i<path.length-1;i++){
+  const a=path[i],b=path[i+1];
+  let sx=a.x,sz=a.z;
+  if(i===bestIndex){sx=lookX;sz=lookZ}
+  const dx=b.x-sx,dz=b.z-sz,len=Math.hypot(dx,dz);
+  if(len>=remaining){lookX=sx+dx/len*remaining;lookZ=sz+dz/len*remaining;remaining=0;break}
+  remaining-=len;lookX=b.x;lookZ=b.z;
+ }
+ rakeTrailGizmo.marker.position.set(lookX,y,lookZ);
+ rakeTrailGizmo.marker.visible=true;
 }
 function triangleContainsPoint(poly,x,z){
  const [a,b,c]=poly.vertices;
