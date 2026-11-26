@@ -237,7 +237,7 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,wallFollow:false,wallSide:1,wallObstacle:null,wallStartX:monster.position.x,wallStartZ:monster.position.z,clearFor:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,wallFollow:false,wallSide:1,wallObstacle:null,wallStartX:monster.position.x,wallStartZ:monster.position.z,clearFor:0,reversing:false,reverseUntil:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0});
  const x=monster.position.x,z=monster.position.z;
  const toGoal=new THREE.Vector2(goal.x-x,goal.z-z);
  if(toGoal.lengthSq()<.01)return 0;
@@ -248,6 +248,29 @@ function updateRakeHeadLook(dt){
  const movedSinceCheck=Math.hypot(x-actor.lastX,z-actor.lastZ);
  if(movedSinceCheck<.025)actor.stuckFor+=dt;else actor.stuckFor=0;
  actor.lastX=x;actor.lastZ=z;
+ // A real reverse gear: back away from the obstruction before attempting
+ // another turn. Search all headings, strongly preferring the space behind
+ // the Rake, but never choose a direction that is immediately blocked.
+ if(!actor.reversing&&(currentBlocked||actor.stuckFor>.34)&&elapsed>=actor.retryAt){
+  const backward=actor.dir.clone().multiplyScalar(-1);
+  let escape=null;
+  for(let i=0;i<36;i++){
+   const angle=i*Math.PI*2/36,dir=new THREE.Vector2(Math.sin(angle),Math.cos(angle));
+   const clear=[.45,.9,1.5,2.2,3.0].filter(d=>probe(dir,d)).length;
+   if(!clear)continue;
+   const reverseBias=dir.dot(backward),targetBias=dir.dot(toGoal);
+   const score=clear*1.7+reverseBias*2.2+targetBias*.12;
+   if(!escape||score>escape.score)escape={dir,score};
+  }
+  if(escape){
+   actor.dir.copy(escape.dir);actor.reversing=true;actor.reverseUntil=elapsed+.85;
+   actor.wallFollow=false;actor.avoiding=true;actor.wallStartX=x;actor.wallStartZ=z;
+   actor.stuckFor=0;actor.retryAt=elapsed+.95;
+  }
+ }
+ if(actor.reversing&&elapsed>=actor.reverseUntil){
+  actor.reversing=false;actor.avoiding=false;
+ }
  // Roomba-style bump response: commit to tracing the edge of the nearest
  // obstacle instead of repeatedly choosing a new straight-line escape.
  if(!actor.wallFollow&&(goalBlocked||currentBlocked)){
