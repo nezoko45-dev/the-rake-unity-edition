@@ -270,68 +270,67 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,avoidStartX:monster.position.x,avoidStartZ:monster.position.z,reversing:false,reverseUntil:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0,scanActive:false,scanIndex:0,scanBest:null,lastState:''});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,avoidStartX:monster.position.x,avoidStartZ:monster.position.z,reversing:false,reverseUntil:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0,scanYaw:monster.rotation.y,scanSign:1,scanProgress:0,lastState:''});
  const x=monster.position.x,z=monster.position.z;
  const toGoal=new THREE.Vector2(goal.x-x,goal.z-z);
  if(toGoal.lengthSq()<.01)return 0;
  toGoal.normalize();
- const probe=(dir,distance)=>{const steps=Math.max(2,Math.ceil(distance/.25));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(x+dir.x*distance*t,z+dir.y*distance*t))return false}return true};
- // Exactly two virtual bump sensors: one fixed to the nose and one to the rear.
+ const probe=(dir,distance)=>{const steps=Math.max(2,Math.ceil(distance/.2));for(let i=1;i<=steps;i++){const t=i/steps;if(blocked(x+dir.x*distance*t,z+dir.y*distance*t))return false}return true};
  const forwardSensor=()=>new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y));
  const front=forwardSensor(),rear=front.clone().multiplyScalar(-1);
- const sensorRange=(dir)=>{let range=0;for(const d of [.55,1.2,2.1,3.3,4.8]){if(!probe(dir,d))break;range=d}return range};
- const frontRange=sensorRange(front),rearRange=sensorRange(rear);
- updateRakeRayGizmo(front);
- const goalBlocked=!probe(toGoal,4.2),currentBlocked=frontRange<1.2;
+ const rayDistance=(dir,maxRange=8)=>{
+  let nearest=maxRange;
+  for(const o of obstacles){
+   const ox=o.x-x,oz=o.z-z,along=ox*dir.x+oz*dir.y;
+   if(along<0||along>nearest)continue;
+   const radius=o.r+.8,perpSq=ox*ox+oz*oz-along*along;
+   if(perpSq>radius*radius)continue;
+   const hit=along-Math.sqrt(Math.max(0,radius*radius-perpSq));
+   if(hit>=0&&hit<nearest)nearest=hit;
+  }
+  return nearest;
+ };
+ const minClearance=obstacles.reduce((best,o)=>Math.min(best,Math.hypot(x-o.x,z-o.z)-(o.r+.8)),Infinity);
+ const rearClearance=rayDistance(rear,2.5);
  const movedSinceCheck=Math.hypot(x-actor.lastX,z-actor.lastZ);
  if(movedSinceCheck<.025)actor.stuckFor+=dt;else actor.stuckFor=0;
  actor.lastX=x;actor.lastZ=z;
- // On entering a chase, pause and sweep the single front sensor around the
- // Rake. This is a rotating scan, not a ring of simultaneous sensors.
  const chasing=enemyState==='hunt-player'||enemyState==='hunt-survivor';
- if(chasing&&actor.lastState!==enemyState&&!actor.scanActive){
-  actor.scanActive=true;actor.scanIndex=0;actor.scanBest=null;actor.scanStartYaw=monster.rotation.y;
- }
  actor.lastState=enemyState;
- if(actor.scanActive){
-  const scanDir=forwardSensor(),clearance=sensorRange(scanDir);
-  const alignment=scanDir.dot(toGoal);
-  const score=clearance*1.4+alignment*.35;
-  if(clearance>0&&(!actor.scanBest||score>actor.scanBest.score))actor.scanBest={dir:scanDir.clone(),score};
-  const scanStep=Math.PI*2/12;
-  monster.rotation.y+=Math.min(2.8*dt,scanStep);
-  actor.scanProgress=(actor.scanProgress||0)+Math.min(2.8*dt,scanStep);
-  if(actor.scanProgress>=Math.PI*2-.025){
-   actor.scanActive=false;actor.scanProgress=0;
-   if(actor.scanBest){actor.dir.copy(actor.scanBest.dir);actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z}
-   else actor.dir.copy(toGoal);
-  }
-  return 0;
- }
- // Rear sensor is used only for reversing; if the rear is blocked, pivot
- // toward the side with the clearer forward-facing scan on the next chase.
- if(!actor.reversing&&(currentBlocked||actor.stuckFor>.34)&&elapsed>=actor.retryAt){
-  if(rearRange>.45){
-   actor.dir.copy(front);actor.reversing=true;actor.reverseUntil=elapsed+.65;
-   actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
-   actor.stuckFor=0;actor.retryAt=elapsed+.8;
-  }else{
-   actor.dir.set(Math.sin(monster.rotation.y+Math.PI*.5),Math.cos(monster.rotation.y+Math.PI*.5));
-   actor.reversing=false;actor.wallFollow=false;actor.avoiding=true;
-   actor.stuckFor=0;actor.retryAt=elapsed+.55;
-  }
+ // One long ray sweeps continuously around the Rake. It never pauses for a scan.
+ actor.scanYaw+=actor.scanSign*2.35*dt;
+ actor.scanProgress+=2.35*dt;
+ if(actor.scanProgress>=Math.PI*2){actor.scanProgress-=Math.PI*2;actor.scanSign*=-1}
+ const scanDir=new THREE.Vector2(Math.sin(actor.scanYaw),Math.cos(actor.scanYaw));
+ const scanRange=rayDistance(scanDir,8);
+ updateRakeRayGizmo(scanDir);
+ const frontRange=rayDistance(front,4.8);
+ const goalBlocked=!probe(toGoal,4.2);
+ // Reverse is a close-range bump escape only: never reverse merely because
+ // the Rake is stuck or because a scan has started.
+ if(!actor.reversing&&minClearance<=.9&&rearClearance>.35&&elapsed>=actor.retryAt){
+  actor.reversing=true;actor.reverseUntil=elapsed+.42;
+  actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
+  actor.stuckFor=0;actor.retryAt=elapsed+.65;
  }
  if(actor.reversing&&elapsed>=actor.reverseUntil){actor.reversing=false;actor.avoiding=false}
- // No wall-following: when blocked, reverse if safe, then steer toward the target.
- // Keep a short escape heading only until the Rake has cleared the obstruction.
+ // When the direct route is obstructed, let the continuously rotating ray
+ // find a clear heading. Latch that heading briefly instead of oscillating
+ // after every ray update; the scanner itself keeps turning throughout.
  if(!actor.reversing){
-  if(!actor.avoiding)actor.dir.copy(toGoal);
-  else if(Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ)>2.4&&!goalBlocked){
-   actor.avoiding=false;actor.dir.copy(toGoal);
+  if(!actor.avoiding&&(frontRange<3.0||goalBlocked||actor.stuckFor>.65)){
+   actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
   }
+  if(actor.avoiding){
+   if(scanRange>2.6&&probe(scanDir,Math.min(scanRange,3.2))){
+    actor.dir.copy(scanDir);actor.avoidStartX=x;actor.avoidStartZ=z;
+   }
+   const cleared=Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ)>2.1&&!goalBlocked&&probe(toGoal,4.2);
+   if(cleared){actor.avoiding=false;actor.dir.copy(toGoal)}
+  }else actor.dir.copy(toGoal);
  }
- // Rotate the body first. The front sensor always points where the Rake faces.
- const desiredYaw=Math.atan2(actor.dir.x,actor.dir.y);
+ // Turn the Rake's body toward the chosen heading before moving.
+ const desiredYaw=actor.reversing?Math.atan2(front.x,front.y):Math.atan2(actor.dir.x,actor.dir.y);
  let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*dt);
  delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
@@ -340,7 +339,7 @@ function updateRakeHeadLook(dt){
  const moveDir=actor.reversing?rear:forwardSensor();
  const step=speed*dt,nx=x+moveDir.x*step,nz=z+moveDir.y*step;
  if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){monster.position.x=nx;monster.position.z=nz}
- else{actor.stuckFor=Math.max(actor.stuckFor,.4);actor.retryAt=Math.min(actor.retryAt,elapsed)}
+ else{actor.stuckFor=Math.max(actor.stuckFor,.4)}
  return Math.hypot(monster.position.x-x,monster.position.z-z)/Math.max(dt,.001);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
