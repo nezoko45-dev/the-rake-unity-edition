@@ -263,7 +263,7 @@ function updateRakeHeadLook(dt){
  const target=nearestWalkableTriangle(buildGlobalPolygonDebug(),goal.x,goal.z,8);
  const signature=globalPolygonDebugSignature;
  const route=actor.triangleRoute;
- const currentOnRoute=route&&current&&route.slice(Math.max(0,actor.trailIndex-1)).some(p=>p.key===current.key);
+ const currentOnRoute=route&&current&&route.some(p=>p.key===current.key);
  const goalChanged=Math.hypot(goal.x-actor.trailGoalX,goal.z-actor.trailGoalZ)>2.75;
  const needsRoute=!route||!current||!target||actor.triangleRouteGoal!==target.key||actor.triangleRouteSignature!==signature||!currentOnRoute||goalChanged;
  if(needsRoute&&current&&target){
