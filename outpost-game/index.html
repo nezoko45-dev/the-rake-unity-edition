@@ -237,7 +237,7 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,wallFollow:false,wallSide:1,wallObstacle:null,wallStartX:monster.position.x,wallStartZ:monster.position.z,clearFor:0,reversing:false,reverseUntil:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0,scanActive:false,scanIndex:0,scanBest:null,lastState:''});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,avoidStartX:monster.position.x,avoidStartZ:monster.position.z,reversing:false,reverseUntil:0,lastX:monster.position.x,lastZ:monster.position.z,stuckFor:0,retryAt:0,scanActive:false,scanIndex:0,scanBest:null,lastState:''});
  const x=monster.position.x,z=monster.position.z;
  const toGoal=new THREE.Vector2(goal.x-x,goal.z-z);
  if(toGoal.lengthSq()<.01)return 0;
@@ -269,7 +269,7 @@ function updateRakeHeadLook(dt){
   actor.scanProgress=(actor.scanProgress||0)+Math.min(2.8*dt,scanStep);
   if(actor.scanProgress>=Math.PI*2-.025){
    actor.scanActive=false;actor.scanProgress=0;
-   if(actor.scanBest){actor.dir.copy(actor.scanBest.dir);actor.avoiding=true;actor.wallStartX=x;actor.wallStartZ=z}
+   if(actor.scanBest){actor.dir.copy(actor.scanBest.dir);actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z}
    else actor.dir.copy(toGoal);
   }
   return 0;
@@ -279,7 +279,7 @@ function updateRakeHeadLook(dt){
  if(!actor.reversing&&(currentBlocked||actor.stuckFor>.34)&&elapsed>=actor.retryAt){
   if(rearRange>.45){
    actor.dir.copy(front);actor.reversing=true;actor.reverseUntil=elapsed+.65;
-   actor.wallFollow=false;actor.avoiding=true;actor.wallStartX=x;actor.wallStartZ=z;
+   actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
    actor.stuckFor=0;actor.retryAt=elapsed+.8;
   }else{
    actor.dir.set(Math.sin(monster.rotation.y+Math.PI*.5),Math.cos(monster.rotation.y+Math.PI*.5));
@@ -288,40 +288,13 @@ function updateRakeHeadLook(dt){
   }
  }
  if(actor.reversing&&elapsed>=actor.reverseUntil){actor.reversing=false;actor.avoiding=false}
- // Begin perimeter following only when the nose sensor confirms an obstacle.
- if(!actor.wallFollow&&(goalBlocked||currentBlocked)){
-  let nearest=null,nearestDistance=Infinity;
-  for(const o of obstacles){const d=Math.hypot(x-o.x,z-o.z);if(d<o.r+5.5&&d<nearestDistance){nearest=o;nearestDistance=d}}
-  if(nearest){
-   const rx=x-nearest.x,rz=z-nearest.z,rl=Math.max(.001,Math.hypot(rx,rz));
-   const radial=new THREE.Vector2(rx/rl,rz/rl);
-   const left=new THREE.Vector2(-radial.y,radial.x),right=left.clone().multiplyScalar(-1);
-   actor.wallSide=left.dot(toGoal)>=right.dot(toGoal)?1:-1;
-   actor.wallObstacle=nearest;actor.wallFollow=true;actor.avoiding=true;
-   actor.wallStartX=x;actor.wallStartZ=z;actor.clearFor=0;actor.stuckFor=0;
-  }
- }
- if(actor.wallFollow){
-  let o=actor.wallObstacle;
-  if(!obstacles.includes(o))o=null;
-  if(!o){let best=null,bestD=Infinity;for(const candidate of obstacles){const d=Math.hypot(x-candidate.x,z-candidate.z);if(d<bestD&&d<7){best=candidate;bestD=d}}o=actor.wallObstacle=best}
-  const traveled=Math.hypot(x-actor.wallStartX,z-actor.wallStartZ);
-  if(!goalBlocked&&frontRange>3.3&&traveled>2.2)actor.clearFor+=dt;else actor.clearFor=0;
-  if(actor.clearFor>1.0){actor.wallFollow=false;actor.avoiding=false;actor.wallObstacle=null;actor.dir.copy(toGoal)}
-  else if(o){
-   const rx=x-o.x,rz=z-o.z,dist=Math.max(.001,Math.hypot(rx,rz)),radial=new THREE.Vector2(rx/dist,rz/dist);
-   const tangent=new THREE.Vector2(-radial.y,radial.x).multiplyScalar(actor.wallSide);
-   const desiredRadius=o.r+1.4,correction=THREE.MathUtils.clamp((desiredRadius-dist)*1.1,-.9,.9);
-   const follow=tangent.multiplyScalar(1.45).add(radial.multiplyScalar(correction));
-   if(follow.lengthSq()>.001)follow.normalize();
-   if(!probe(follow,1.1)){actor.wallSide*=-1;follow.set(-radial.y,radial.x).multiplyScalar(actor.wallSide)}
-   actor.dir.copy(follow);
-   if(actor.stuckFor>.8&&elapsed>=actor.retryAt){actor.wallSide*=-1;actor.stuckFor=0;actor.retryAt=elapsed+.5}
-  }else{actor.wallFollow=false;actor.avoiding=false;actor.dir.copy(toGoal)}
- }
- if(!actor.wallFollow&&!actor.reversing){
+ // No wall-following: when blocked, reverse if safe, then steer toward the target.
+ // Keep a short escape heading only until the Rake has cleared the obstruction.
+ if(!actor.reversing){
   if(!actor.avoiding)actor.dir.copy(toGoal);
-  else if(Math.hypot(x-actor.wallStartX,z-actor.wallStartZ)>2.4&&!goalBlocked){actor.avoiding=false;actor.dir.copy(toGoal)}
+  else if(Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ)>2.4&&!goalBlocked){
+   actor.avoiding=false;actor.dir.copy(toGoal);
+  }
  }
  // Rotate the body first. The front sensor always points where the Rake faces.
  const desiredYaw=Math.atan2(actor.dir.x,actor.dir.y);
