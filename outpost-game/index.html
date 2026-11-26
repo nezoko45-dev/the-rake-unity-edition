@@ -295,41 +295,46 @@ function updateRakeHeadLook(dt){
  const movedSinceCheck=Math.hypot(x-actor.lastX,z-actor.lastZ);
  if(movedSinceCheck<.025)actor.stuckFor+=dt;else actor.stuckFor=0;
  actor.lastX=x;actor.lastZ=z;
- const chasing=enemyState==='hunt-player'||enemyState==='hunt-survivor';
  actor.lastState=enemyState;
- // One long ray sweeps continuously around the Rake. It never pauses for a scan.
+ // The single ray continuously sweeps 360 degrees, reversing sweep direction
+ // each revolution. It is a proximity/avoidance sensor, never the chase heading.
  actor.scanYaw+=actor.scanSign*2.35*dt;
  actor.scanProgress+=2.35*dt;
  if(actor.scanProgress>=Math.PI*2){actor.scanProgress-=Math.PI*2;actor.scanSign*=-1}
  const scanDir=new THREE.Vector2(Math.sin(actor.scanYaw),Math.cos(actor.scanYaw));
  const scanRange=rayDistance(scanDir,8);
  updateRakeRayGizmo(scanDir);
- const frontRange=rayDistance(front,4.8);
- const goalBlocked=!probe(toGoal,4.2);
- // Reverse is a close-range bump escape only: never reverse merely because
- // the Rake is stuck or because a scan has started.
+ // Reverse only when the Rake is within 0.9 units of an obstacle's collision edge.
  if(!actor.reversing&&minClearance<=.9&&rearClearance>.35&&elapsed>=actor.retryAt){
   actor.reversing=true;actor.reverseUntil=elapsed+.42;
-  actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
+  actor.avoidStartX=x;actor.avoidStartZ=z;
   actor.stuckFor=0;actor.retryAt=elapsed+.65;
  }
- if(actor.reversing&&elapsed>=actor.reverseUntil){actor.reversing=false;actor.avoiding=false}
- // When the direct route is obstructed, let the continuously rotating ray
- // find a clear heading. Latch that heading briefly instead of oscillating
- // after every ray update; the scanner itself keeps turning throughout.
+ if(actor.reversing&&elapsed>=actor.reverseUntil)actor.reversing=false;
  if(!actor.reversing){
-  if(!actor.avoiding&&(frontRange<3.0||goalBlocked||actor.stuckFor>.65)){
-   actor.avoiding=true;actor.avoidStartX=x;actor.avoidStartZ=z;
+  // Default steering always points at the active target. Only a ray hit in
+  // the target-facing corridor is allowed to temporarily deflect that heading.
+  if(!actor.avoiding&&scanRange<3.2&&scanDir.dot(toGoal)>.45){
+   const sideA=toGoal.clone().rotateAround(new THREE.Vector2(),.78);
+   const sideB=toGoal.clone().rotateAround(new THREE.Vector2(),-.78);
+   const clearA=rayDistance(sideA,4.5),clearB=rayDistance(sideB,4.5);
+   const scoreA=clearA+sideA.dot(toGoal)*1.8;
+   const scoreB=clearB+sideB.dot(toGoal)*1.8;
+   const chosen=scoreA>=scoreB?sideA:sideB;
+   const chosenClearance=Math.max(clearA,clearB);
+   if(chosenClearance>1.15&&probe(chosen,Math.min(3.2,chosenClearance))){
+    actor.dir.copy(chosen);actor.avoiding=true;
+    actor.avoidStartX=x;actor.avoidStartZ=z;
+   }
   }
   if(actor.avoiding){
-   if(scanRange>2.6&&probe(scanDir,Math.min(scanRange,3.2))){
-    actor.dir.copy(scanDir);actor.avoidStartX=x;actor.avoidStartZ=z;
-   }
-   const cleared=Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ)>2.1&&!goalBlocked&&probe(toGoal,4.2);
-   if(cleared){actor.avoiding=false;actor.dir.copy(toGoal)}
+   const movedAround=Math.hypot(x-actor.avoidStartX,z-actor.avoidStartZ);
+   const targetRouteClear=probe(toGoal,3.6);
+   if(movedAround>1.35&&targetRouteClear){actor.avoiding=false;actor.dir.copy(toGoal)}
   }else actor.dir.copy(toGoal);
  }
- // Turn the Rake's body toward the chosen heading before moving.
+ // Rotate the body toward the target, or a short-lived ray-selected escape
+ // heading, before moving. Never chase along the ray's sweep direction.
  const desiredYaw=actor.reversing?Math.atan2(front.x,front.y):Math.atan2(actor.dir.x,actor.dir.y);
  let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*dt);
