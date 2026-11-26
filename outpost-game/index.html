@@ -70,7 +70,7 @@ let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
 
 function blocked(x,z){return obstacles.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+.8)}
 let rakeRayGizmo=null;
-function updateRakeRayGizmo(dir){
+function updateRakeRayGizmo(dir,steerDir,steeringMode='chase'){
  if(!monster)return;
  const maxRange=8,originX=monster.position.x,originZ=monster.position.z;
  let hitDistance=maxRange,hit=false;
@@ -83,23 +83,23 @@ function updateRakeRayGizmo(dir){
   if(near>=0&&near<hitDistance){hitDistance=near;hit=true}
  }
  if(!rakeRayGizmo){
-  const geometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
-  const material=new THREE.LineBasicMaterial({color:0x45f5b0,transparent:true,opacity:.95,depthTest:false});
-  const line=new THREE.Line(geometry,material);line.renderOrder=20;scene.add(line);
-  const tip=new THREE.Mesh(new THREE.SphereGeometry(.13,8,6),new THREE.MeshBasicMaterial({color:0x45f5b0,depthTest:false}));
-  tip.renderOrder=21;scene.add(tip);
-  rakeRayGizmo={line,tip};
+  const makeLine=(color,opacity)=>{const geometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);const material=new THREE.LineBasicMaterial({color,transparent:true,opacity,depthTest:false});const line=new THREE.Line(geometry,material);line.renderOrder=20;scene.add(line);return line};
+  const makeTip=color=>{const tip=new THREE.Mesh(new THREE.SphereGeometry(.15,10,8),new THREE.MeshBasicMaterial({color,depthTest:false}));tip.renderOrder=21;scene.add(tip);return tip};
+  rakeRayGizmo={line:makeLine(0x45f5b0,.95),tip:makeTip(0x45f5b0),steerLine:makeLine(0x36cfff,1),steerTip:makeTip(0x36cfff)};
  }
- const y=monster.position.y+1.05;
- const start=new THREE.Vector3(originX,y,originZ);
+ const y=monster.position.y+1.05,start=new THREE.Vector3(originX,y,originZ);
  const end=new THREE.Vector3(originX+dir.x*hitDistance,y,originZ+dir.y*hitDistance);
  const positions=rakeRayGizmo.line.geometry.attributes.position;
  positions.setXYZ(0,start.x,start.y,start.z);positions.setXYZ(1,end.x,end.y,end.z);
  positions.needsUpdate=true;rakeRayGizmo.line.geometry.computeBoundingSphere();
- const color=hit?0xff514d:0x45f5b0;
- rakeRayGizmo.line.material.color.setHex(color);
- rakeRayGizmo.tip.material.color.setHex(color);
- rakeRayGizmo.tip.position.copy(end);
+ const rayColor=hit?0xff3030:0x45f5b0;
+ rakeRayGizmo.line.material.color.setHex(rayColor);rakeRayGizmo.tip.material.color.setHex(rayColor);rakeRayGizmo.tip.position.copy(end);
+ const steerColor=steeringMode==='avoid'?0xffa126:steeringMode==='reverse'?0xc084fc:0x36cfff;
+ const steerEnd=new THREE.Vector3(originX+steerDir.x*3.4,y+.08,originZ+steerDir.y*3.4);
+ const steerPositions=rakeRayGizmo.steerLine.geometry.attributes.position;
+ steerPositions.setXYZ(0,start.x,start.y+.08,start.z);steerPositions.setXYZ(1,steerEnd.x,steerEnd.y,steerEnd.z);
+ steerPositions.needsUpdate=true;rakeRayGizmo.steerLine.geometry.computeBoundingSphere();
+ rakeRayGizmo.steerLine.material.color.setHex(steerColor);rakeRayGizmo.steerTip.material.color.setHex(steerColor);rakeRayGizmo.steerTip.position.copy(steerEnd);
 }
 
 function triangleContainsPoint(poly,x,z){
@@ -303,7 +303,7 @@ function updateRakeHeadLook(dt){
  if(actor.scanProgress>=Math.PI*2){actor.scanProgress-=Math.PI*2;actor.scanSign*=-1}
  const scanDir=new THREE.Vector2(Math.sin(actor.scanYaw),Math.cos(actor.scanYaw));
  const scanRange=rayDistance(scanDir,8);
- updateRakeRayGizmo(scanDir);
+
  // Reverse only when the Rake is within 0.9 units of an obstacle's collision edge.
  if(!actor.reversing&&minClearance<=.9&&rearClearance>.35&&elapsed>=actor.retryAt){
   actor.reversing=true;actor.reverseUntil=elapsed+.42;
@@ -333,6 +333,9 @@ function updateRakeHeadLook(dt){
    if(movedAround>1.35&&targetRouteClear){actor.avoiding=false;actor.dir.copy(toGoal)}
   }else actor.dir.copy(toGoal);
  }
+ const steeringMode=actor.reversing?'reverse':actor.avoiding?'avoid':'chase';
+ const steeringDir=actor.reversing?rear:actor.dir;
+ updateRakeRayGizmo(scanDir,steeringDir,steeringMode);
  // Rotate the body toward the target, or a short-lived ray-selected escape
  // heading, before moving. Never chase along the ray's sweep direction.
  const desiredYaw=actor.reversing?Math.atan2(front.x,front.y):Math.atan2(actor.dir.x,actor.dir.y);
