@@ -278,7 +278,7 @@ function updateRakeHeadLook(dt){
  // toward the side with the clearer forward-facing scan on the next chase.
  if(!actor.reversing&&(currentBlocked||actor.stuckFor>.34)&&elapsed>=actor.retryAt){
   if(rearRange>.45){
-   actor.dir.copy(rear);actor.reversing=true;actor.reverseUntil=elapsed+.65;
+   actor.dir.copy(front);actor.reversing=true;actor.reverseUntil=elapsed+.65;
    actor.wallFollow=false;actor.avoiding=true;actor.wallStartX=x;actor.wallStartZ=z;
    actor.stuckFor=0;actor.retryAt=elapsed+.8;
   }else{
