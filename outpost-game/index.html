@@ -8,7 +8,44 @@
 <script>window.addEventListener('error',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Game error: '+e.message+' @ '+e.lineno;console.error(e.error)});
 let noticeHideTimer=0;function notice(message){const el=document.querySelector('#notice');if(!el)return;el.textContent=String(message);el.style.display='block';clearTimeout(noticeHideTimer);noticeHideTimer=setTimeout(()=>{el.style.display='none'},2800)}window.addEventListener('unhandledrejection',e=>{const n=document.querySelector('#notice');n.style.display='block';n.textContent='Load error: '+e.reason;console.error(e.reason)});</script>
 <script type="module">
-import * as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';import * as SU from 'three/addons/utils/SkeletonUtils.js';
+import * as THREE from 'three';import polygonClipping from 'https://esm.sh/polygon-clipping@0.15.7';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';import * as SU from 'three/addons/utils/SkeletonUtils.js';
+
+// Geometry-derived polygon-clipped navigation surface. Mesh triangles are projected
+// into X/Z, unioned, and subtracted from the floor footprint with polygon-clipping.
+let rakeClippedNavMesh=null,rakeClippedNavRegions=[],rakeClippedNavSignature='';
+function rakeClippedNavHull(points){
+ points.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);const lo=[],hi=[];
+ for(const p of points){while(lo.length>1&&cross(lo[lo.length-2],lo[lo.length-1],p)<=1e-7)lo.pop();lo.push(p)}
+ for(let i=points.length-1;i>=0;i--){const p=points[i];while(hi.length>1&&cross(hi[hi.length-2],hi[hi.length-1],p)<=1e-7)hi.pop();hi.push(p)}
+ lo.pop();hi.pop();return lo.concat(hi);
+}
+function rakeClippedNavFootprint(mesh){
+ mesh.updateMatrixWorld(true);const g=mesh.geometry;if(!g)return null;const pos=g.attributes.position;if(!pos)return null;const pts=[];
+ for(let i=0;i<pos.count;i++){const v=new THREE.Vector3().fromBufferAttribute(pos,i).applyMatrix4(mesh.matrixWorld);pts.push([v.x,v.z])}
+ const hull=rakeClippedNavHull(pts);return hull.length>=3?[[...hull,hull[0]]]:null;
+}
+function rakeClippedNavBuild(){
+ const clips=[];
+ for(const source of obstacles){const meshes=source.isObject3D?[source]:(source.meshes||source.children||[]);for(const m of meshes){if(!m?.isMesh)continue;const p=rakeClippedNavFootprint(m);if(p)clips.push(p)}}
+ const floor=(()=>{let a=Infinity,b=-Infinity,c=Infinity,d=-Infinity;for(const ch of chunkMap.values()){a=Math.min(a,ch.cx*CHUNK-CHUNK/2);b=Math.max(b,ch.cx*CHUNK+CHUNK/2);c=Math.min(c,ch.cz*CHUNK-CHUNK/2);d=Math.max(d,ch.cz*CHUNK+CHUNK/2)}return{minX:Number.isFinite(a)?a:-64,maxX:Number.isFinite(b)?b:64,minZ:Number.isFinite(c)?c:-64,maxZ:Number.isFinite(d)?d:64}})();let regions=[[[[floor.minX,floor.minZ],[floor.maxX,floor.minZ],[floor.maxX,floor.maxZ],[floor.minX,floor.maxZ],[floor.minX,floor.minZ]]]];
+ if(clips.length){const merged=polygonClipping.union(...clips);regions=polygonClipping.difference(regions,merged)}
+ rakeClippedNavRegions=regions;
+ if(rakeClippedNavMesh){scene.remove(rakeClippedNavMesh);rakeClippedNavMesh.geometry.dispose()}
+ const positions=[],indices=[];let base=0;
+ for(const poly of regions){if(!poly.length)continue;const rings=poly.map(r=>r.slice(0,-1).map(p=>new THREE.Vector2(p[0],p[1])));if(rings[0].length<3)continue;
+  const flat=[...rings[0],...rings.slice(1).flat()];const tris=THREE.ShapeUtils.triangulateShape(rings[0],rings.slice(1));
+  for(const p of flat)positions.push(p.x,.035,p.y);
+  for(const tri of tris)indices.push(base+tri[0],base+tri[1],base+tri[2]);base+=flat.length;
+ }
+ const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.computeVertexNormals();
+ rakeClippedNavMesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x35d69a,side:THREE.DoubleSide,transparent:true,opacity:.22,depthWrite:false}));rakeClippedNavMesh.name='Polygon-clipped navigation surface';rakeClippedNavMesh.userData.navigationSurface=true;rakeClippedNavMesh.visible=false;scene.add(rakeClippedNavMesh);
+ rakeClippedNavSignature=String(clips.length)+':'+positions.length;return rakeClippedNavRegions;
+}
+function rakeClippedNavInside(x,z){
+ for(const poly of rakeClippedNavRegions){let inside=false;const ring=poly[0];for(let i=0,j=ring.length-1;i<ring.length;j=i++){const a=ring[i],b=ring[j];if(((a[1]>z)!==(b[1]>z))&&(x<(b[0]-a[0])*(z-a[1])/(b[1]-a[1])+a[0]))inside=!inside}if(inside){let hole=false;for(let h=1;h<poly.length;h++){const r=poly[h];let hit=false;for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[i],b=r[j];if(((a[1]>z)!==(b[1]>z))&&(x<(b[0]-a[0])*(z-a[1])/(b[1]-a[1])+a[0]))hit=!hit}if(hit){hole=true;break}}if(!hole)return true}}
+ return false;
+}
+function rakeClippedNavSegmentClear(ax,az,bx,bz,pad=.35){const d=Math.hypot(bx-ax,bz-az),n=Math.max(1,Math.ceil(d/Math.max(.2,pad)));for(let i=0;i<=n;i++){const t=i/n;if(!rakeClippedNavInside(ax+(bx-ax)*t,az+(bz-az)*t))return false}return true;}
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8db5d3);scene.fog=new THREE.Fog(0x8db5d3,55,190);
 const camera=new THREE.PerspectiveCamera(76,innerWidth/innerHeight,.1,250);camera.position.set(0,2,14);
 const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
@@ -18,7 +55,7 @@ const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});const
 const chunkGroundGeometry=new THREE.PlaneGeometry(32,32),chunkGroundMaterial=mat(0x18251b);
 const obstacles=[];const rakeGlobalObstacleMap={cell:16,cells:new Map(),dirty:true};
 function rakeMapCellKey(x,z){return Math.floor(x/rakeGlobalObstacleMap.cell)+','+Math.floor(z/rakeGlobalObstacleMap.cell)}
-function rebuildRakeGlobalObstacleMap(){const map=rakeGlobalObstacleMap;map.cells.clear();for(const obstacle of obstacles){const bounds=new THREE.Box3();bounds.makeEmpty();for(const mesh of obstacle.meshes||[]){mesh.updateMatrixWorld(true);bounds.union(new THREE.Box3().setFromObject(mesh))}if(bounds.isEmpty())continue;const entry={obstacle,contour:{minX:bounds.min.x,maxX:bounds.max.x,minZ:bounds.min.z,maxZ:bounds.max.z}};for(let ix=Math.floor(bounds.min.x/map.cell);ix<=Math.floor(bounds.max.x/map.cell);ix++)for(let iz=Math.floor(bounds.min.z/map.cell);iz<=Math.floor(bounds.max.z/map.cell);iz++){const key=ix+','+iz;let bucket=map.cells.get(key);if(!bucket)map.cells.set(key,bucket=[]);bucket.push(entry)}}map.dirty=false}
+function rebuildRakeGlobalObstacleMap(){const map=rakeGlobalObstacleMap;map.cells.clear();for(const obstacle of obstacles){const bounds=new THREE.Box3();bounds.makeEmpty();for(const mesh of obstacle.meshes||[]){mesh.updateMatrixWorld(true);bounds.union(new THREE.Box3().setFromObject(mesh))}if(bounds.isEmpty())continue;const entry={obstacle,contour:{minX:bounds.min.x,maxX:bounds.max.x,minZ:bounds.min.z,maxZ:bounds.max.z}};for(let ix=Math.floor(bounds.min.x/map.cell);ix<=Math.floor(bounds.max.x/map.cell);ix++)for(let iz=Math.floor(bounds.min.z/map.cell);iz<=Math.floor(bounds.max.z/map.cell);iz++){const key=ix+','+iz;let bucket=map.cells.get(key);if(!bucket)map.cells.set(key,bucket=[]);bucket.push(entry)}}map.dirty=false;rakeClippedNavBuild()}
 function queryRakeGlobalObstacleMap(x,z,radius=30){const map=rakeGlobalObstacleMap;if(map.dirty)rebuildRakeGlobalObstacleMap();const found=new Map(),minX=Math.floor((x-radius)/map.cell),maxX=Math.floor((x+radius)/map.cell),minZ=Math.floor((z-radius)/map.cell),maxZ=Math.floor((z+radius)/map.cell);for(let ix=minX;ix<=maxX;ix++)for(let iz=minZ;iz<=maxZ;iz++)for(const e of map.cells.get(ix+','+iz)||[]){if(found.has(e.obstacle))continue;const b=e.contour,cx=Math.max(b.minX,Math.min(x,b.maxX)),cz=Math.max(b.minZ,Math.min(z,b.maxZ));if(Math.hypot(cx-x,cz-z)<=radius)found.set(e.obstacle,e)}return [...found.values()]}
 function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block){obstacles.push({x,z,r:Math.max(sx,sz)*.52,meshes:[o]});rakeGlobalObstacleMap.dirty=true}return o}
 const trail=new THREE.Mesh(new THREE.PlaneGeometry(12,260),pathMat);trail.rotation.x=-Math.PI/2;trail.position.y=.015;scene.add(trail);
@@ -207,7 +244,7 @@ function buildGlobalPolygonDebug(){
 }
 function bridgeClear(ax,az,bx,bz){
  const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz),samples=Math.max(1,Math.ceil(length/.35));
- for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t))return false}
+ for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t)||!rakeClippedNavInside(ax+dx*t,az+dz*t))return false}
  return true;
 }
 function nearestWalkableTriangle(polygons,x,z,maxDistance=7){
