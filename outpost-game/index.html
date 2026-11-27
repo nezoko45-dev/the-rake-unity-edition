@@ -16,7 +16,11 @@ const controls=new PointerLockControls(camera,renderer.domElement);scene.add(con
 const hemi=new THREE.HemisphereLight(0xc8e4ff,0x34452e,2.2);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffe3b0,2.0);sun.position.set(-20,35,12);scene.add(sun);
 const mat=(c,r=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:r});const bark=mat(0x33251b),leaf=mat(0x172d20),leaf2=mat(0x243d29),rock=mat(0x343b3b),pathMat=mat(0x3c3b32);
 const chunkGroundGeometry=new THREE.PlaneGeometry(32,32),chunkGroundMaterial=mat(0x18251b);
-const obstacles=[];function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block)obstacles.push({x,z,r:Math.max(sx,sz)*.52,meshes:[o]});return o}
+const obstacles=[];const rakeGlobalObstacleMap={cell:16,cells:new Map(),dirty:true};
+function rakeMapCellKey(x,z){return Math.floor(x/rakeGlobalObstacleMap.cell)+','+Math.floor(z/rakeGlobalObstacleMap.cell)}
+function rebuildRakeGlobalObstacleMap(){const map=rakeGlobalObstacleMap;map.cells.clear();for(const obstacle of obstacles){const bounds=new THREE.Box3();bounds.makeEmpty();for(const mesh of obstacle.meshes||[]){mesh.updateMatrixWorld(true);bounds.union(new THREE.Box3().setFromObject(mesh))}if(bounds.isEmpty())continue;const entry={obstacle,contour:{minX:bounds.min.x,maxX:bounds.max.x,minZ:bounds.min.z,maxZ:bounds.max.z}};for(let ix=Math.floor(bounds.min.x/map.cell);ix<=Math.floor(bounds.max.x/map.cell);ix++)for(let iz=Math.floor(bounds.min.z/map.cell);iz<=Math.floor(bounds.max.z/map.cell);iz++){const key=ix+','+iz;let bucket=map.cells.get(key);if(!bucket)map.cells.set(key,bucket=[]);bucket.push(entry)}}map.dirty=false}
+function queryRakeGlobalObstacleMap(x,z,radius=30){const map=rakeGlobalObstacleMap;if(map.dirty)rebuildRakeGlobalObstacleMap();const found=new Map(),minX=Math.floor((x-radius)/map.cell),maxX=Math.floor((x+radius)/map.cell),minZ=Math.floor((z-radius)/map.cell),maxZ=Math.floor((z+radius)/map.cell);for(let ix=minX;ix<=maxX;ix++)for(let iz=minZ;iz<=maxZ;iz++)for(const e of map.cells.get(ix+','+iz)||[]){if(found.has(e.obstacle))continue;const b=e.contour,cx=Math.max(b.minX,Math.min(x,b.maxX)),cz=Math.max(b.minZ,Math.min(z,b.maxZ));if(Math.hypot(cx-x,cz-z)<=radius)found.set(e.obstacle,e)}return [...found.values()]}
+function box(x,y,z,sx,sy,sz,m,block=true){const o=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),m);o.position.set(x,y,z);scene.add(o);if(block){obstacles.push({x,z,r:Math.max(sx,sz)*.52,meshes:[o]});rakeGlobalObstacleMap.dirty=true}return o}
 const trail=new THREE.Mesh(new THREE.PlaneGeometry(12,260),pathMat);trail.rotation.x=-Math.PI/2;trail.position.y=.015;scene.add(trail);
 const trail2=new THREE.Mesh(new THREE.PlaneGeometry(180,9),pathMat);trail2.rotation.x=-Math.PI/2;trail2.position.y=.02;scene.add(trail2);
 let seed=931;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
@@ -26,8 +30,8 @@ function makeChunk(cx,cz){const key=cx+','+cz;if(chunkMap.has(key))return;const 
 const groundTile=new THREE.Mesh(chunkGroundGeometry,chunkGroundMaterial);groundTile.rotation.x=-Math.PI/2;groundTile.position.set(cx*CHUNK,-.025,cz*CHUNK);groundTile.receiveShadow=true;scene.add(groundTile);items.push(groundTile);
 for(let i=0;i<24;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<9||Math.abs(z)<7)continue;pine(x,z,6+cr()*9,items,obs)}
 for(let i=0;i<3;i++){const x=cx*CHUNK+(cr()-.5)*CHUNK,z=cz*CHUNK+(cr()-.5)*CHUNK;if(Math.abs(x)<10&&Math.abs(z)<10)continue;const rr=.7+cr()*1.5,o=new THREE.Mesh(new THREE.DodecahedronGeometry(rr,0),rock);o.position.set(x,rr*.55,z);scene.add(o);items.push(o);obs.push({x,z,r:rr*.8,meshes:[o]})}
-chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs)}
-function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key);globalPolygonDebugCache=null}}}
+chunkMap.set(key,{items,obs,cx,cz});obstacles.push(...obs);rakeGlobalObstacleMap.dirty=true}
+function updateChunks(){const p=controls.getObject().position,cx=Math.floor(p.x/CHUNK),cz=Math.floor(p.z/CHUNK);for(let x=cx-CHUNK_RADIUS;x<=cx+CHUNK_RADIUS;x++)for(let z=cz-CHUNK_RADIUS;z<=cz+CHUNK_RADIUS;z++)makeChunk(x,z);for(const [key,c] of chunkMap){if(Math.abs(c.cx-cx)>CHUNK_RADIUS+1||Math.abs(c.cz-cz)>CHUNK_RADIUS+1){for(const o of c.items)scene.remove(o);for(const o of c.obs){const i=obstacles.indexOf(o);if(i>=0)obstacles.splice(i,1)}chunkMap.delete(key);rakeGlobalObstacleMap.dirty=true;globalPolygonDebugCache=null}}}
 const flashlight=new THREE.SpotLight(0xe4f0ff,0,42,Math.PI/9,.32,1.15);flashlight.position.set(0,-.08,-.18);camera.add(flashlight);const ft=new THREE.Object3D();ft.position.set(0,0,-12);camera.add(ft);flashlight.target=ft;let lightOn=false;
 const loader=new GLTFLoader();let template=null,clips=[],monster=null,mixer=null,action=null,headBone=null,headBaseY=0;
 const paths=['/the-rake-unity-edition/Assets/the%20raker.glb','../Assets/the%20raker.glb','/the-rake-unity-edition/Assets/dover_demon_the_rake_-_v1.glb','../Assets/dover_demon_the_rake_-_v1.glb','../Assets/MONSTER2.GLB.GLB'];
@@ -305,24 +309,9 @@ function updateRakeHeadLook(dt){
  const rememberFailedDirection=yaw=>{const old=actor.failedDirections.find(e=>Math.abs(Math.atan2(Math.sin(e.yaw-yaw),Math.cos(e.yaw-yaw)))<.22);if(old)old.at=elapsed;else actor.failedDirections.push({yaw,at:elapsed})};
  const failedDirectionPenalty=yaw=>{let penalty=0;for(const e of actor.failedDirections){const delta=Math.abs(Math.atan2(Math.sin(e.yaw-yaw),Math.cos(e.yaw-yaw)));if(delta<.62)penalty+=((.62-delta)/.62)*7}return penalty};
  const x=monster.position.x,z=monster.position.z;
- // One full-length beam rotates clockwise without stopping. Every hit object
- // is kept as a short-term memory entry for twelve seconds.
- actor.scanAngle=(actor.scanAngle-Math.PI*1.4*Math.max(0,dt))%(Math.PI*2);
- if(actor.scanAngle<0)actor.scanAngle+=Math.PI*2;
- const dx=Math.sin(actor.scanAngle),dz=Math.cos(actor.scanAngle);
- let nearest=null,nearestT=Infinity,nearestContour=null;
- for(const obstacle of obstacles){
-  const bounds=new THREE.Box3();bounds.makeEmpty();
-  for(const mesh of obstacle.meshes||[]){mesh.updateMatrixWorld(true);bounds.union(new THREE.Box3().setFromObject(mesh))}
-  if(bounds.isEmpty())continue;
-  let lo=0,hi=30,valid=true;
-  for(const [origin,dir,min,max] of [[x,dx,bounds.min.x,bounds.max.x],[z,dz,bounds.min.z,bounds.max.z]]){
-   if(Math.abs(dir)<1e-8){if(origin<min||origin>max){valid=false;break}}
-   else{let a=(min-origin)/dir,b=(max-origin)/dir;if(a>b){const q=a;a=b;b=q}lo=Math.max(lo,a);hi=Math.min(hi,b);if(hi<lo){valid=false;break}}
-  }
-  if(valid&&hi>=0&&lo<nearestT){nearestT=Math.max(0,lo);nearest=obstacle;nearestContour={minX:bounds.min.x,maxX:bounds.max.x,minZ:bounds.min.z,maxZ:bounds.max.z}}
- }
- if(nearest){const old=actor.seenObjects.find(e=>e.object===nearest);if(old){old.lastSeen=elapsed;old.contour=nearestContour}else actor.seenObjects.push({object:nearest,lastSeen:elapsed,contour:nearestContour})}
+ // Query the shared spatial obstacle map; no rotating ray or per-frame scene scan.
+ const nearbyMapEntries=queryRakeGlobalObstacleMap(x,z,30);
+ for(const entry of nearbyMapEntries){const obstacle=entry.obstacle,old=actor.seenObjects.find(e=>e.object===obstacle);if(old){old.lastSeen=elapsed;old.contour=entry.contour}else actor.seenObjects.push({object:obstacle,lastSeen:elapsed,contour:entry.contour})}
  actor.seenObjects=actor.seenObjects.filter(e=>e.object&&obstacles.includes(e.object)&&elapsed-e.lastSeen<12&&e.contour);
  const toX=goal.x-x,toZ=goal.z-z,targetYaw=Math.atan2(toX,toZ);
  // Score a fan of candidate headings against the remembered object bounds.
