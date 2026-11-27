@@ -12,6 +12,8 @@ import * as THREE from 'three';import polygonClipping from 'https://esm.sh/polyg
 
 // Geometry-derived polygon-clipped navigation surface. Mesh triangles are projected
 // into X/Z, unioned, and subtracted from the floor footprint with polygon-clipping.
+let rakeClippedNavGizmosVisible=false;
+function toggleRAKEClippedNavGizmos(){rakeClippedNavGizmosVisible=!rakeClippedNavGizmosVisible;if(rakeClippedNavMesh)rakeClippedNavMesh.visible=rakeClippedNavGizmosVisible;}
 let rakeClippedNavMesh=null,rakeClippedNavRegions=[],rakeClippedNavSignature='';
 function rakeClippedNavHull(points){
  points.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);const lo=[],hi=[];
@@ -38,7 +40,7 @@ function rakeClippedNavBuild(){
   for(const tri of tris)indices.push(base+tri[0],base+tri[1],base+tri[2]);base+=flat.length;
  }
  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.computeVertexNormals();
- rakeClippedNavMesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x35d69a,side:THREE.DoubleSide,transparent:true,opacity:.22,depthWrite:false}));rakeClippedNavMesh.name='Polygon-clipped navigation surface';rakeClippedNavMesh.userData.navigationSurface=true;rakeClippedNavMesh.visible=false;scene.add(rakeClippedNavMesh);
+ rakeClippedNavMesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x35d69a,side:THREE.DoubleSide,transparent:true,opacity:.22,depthWrite:false}));rakeClippedNavMesh.name='Polygon-clipped navigation surface';rakeClippedNavMesh.userData.navigationSurface=true;rakeClippedNavMesh.visible=rakeClippedNavGizmosVisible;scene.add(rakeClippedNavMesh);
  rakeClippedNavSignature=String(clips.length)+':'+positions.length;return rakeClippedNavRegions;
 }
 function rakeClippedNavInside(x,z){
@@ -104,7 +106,7 @@ const player={hp:100};let keys={},started=false,elapsed=0,phaseTime=0,enemyState
 function playRakeHurtSound(){try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),now=ctx.currentTime;const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();osc.type='sawtooth';osc.frequency.setValueAtTime(260,now);osc.frequency.exponentialRampToValueAtTime(72,now+.42);filter.type='lowpass';filter.frequency.value=950;gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.22,now+.035);gain.gain.exponentialRampToValueAtTime(.0001,now+.62);osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.65);setTimeout(()=>ctx.close(),900)}catch(e){}}
 function damageRake(source){if(!monster||rakeDamageCd>0)return false;rakeHP=Math.max(0,rakeHP-45);rakeDamageCd=3;rakeHurtUntil=elapsed+1.15;rakeSlowUntil=elapsed+1.8;attackAnimUntil=0;anim(/hurt1|hurt/i);if(action)action.timeScale=1;playRakeHurtSound();notice(source+' hit THE RAKE (-45) · '+rakeHP+' HP');return true}
 function playerRakeHit(){if(!started||gameover||!monster||rakeDamageCd>0)return;const p=controls.getObject().position,d=Math.hypot(p.x-monster.position.x,p.z-monster.position.z);if(d<=8)damageRake('Player');else notice('Get within 8 studs to hit THE RAKE');}
-addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}});addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyG'&&!e.repeat)toggleRAKEClippedNavGizmos();if(e.code==='KeyF'){lightOn=!lightOn;flashlight.intensity=lightOn?150:0}});addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('mousedown',e=>{if(e.button===0)playerRakeHit()});
 const NAV_TRI_CELL=1.5;
 let globalPolygonDebugCache=null,globalPolygonDebugSignature='';
