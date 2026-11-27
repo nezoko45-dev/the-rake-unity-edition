@@ -22,8 +22,21 @@ function rakeClippedNavHull(points){
  lo.pop();hi.pop();return lo.concat(hi);
 }
 function rakeClippedNavFootprint(mesh){
- mesh.updateMatrixWorld(true);const g=mesh.geometry;if(!g)return null;const pos=g.attributes.position;if(!pos)return null;const pts=[];
- for(let i=0;i<pos.count;i++){const v=new THREE.Vector3().fromBufferAttribute(pos,i).applyMatrix4(mesh.matrixWorld);pts.push([v.x,v.z])}
+ mesh.updateMatrixWorld(true);
+ const pos=mesh.geometry?.attributes?.position;if(!pos)return null;
+ const pts=[];
+ // Tree blockers provide a compact, explicit trunk footprint. Never project
+ // elevated foliage/canopies onto the ground as if they were solid walls.
+ if(mesh.userData?.navFootprintRadius){
+  const center=new THREE.Vector3();mesh.getWorldPosition(center);
+  const radius=mesh.userData.navFootprintRadius;
+  const ring=[];for(let i=0;i<16;i++){const ang=i*Math.PI*2/16;ring.push([center.x+Math.cos(ang)*radius,center.z+Math.sin(ang)*radius])}
+  const hull=rakeClippedNavHull(ring);return hull.length>=3?[[...hull,hull[0]]]:null;
+ }
+ for(let i=0;i<pos.count;i++){
+  const v=new THREE.Vector3().fromBufferAttribute(pos,i).applyMatrix4(mesh.matrixWorld);
+  pts.push([v.x,v.z]);
+ }
  const hull=rakeClippedNavHull(pts);return hull.length>=3?[[...hull,hull[0]]]:null;
 }
 function rakeClippedNavBuild(){
