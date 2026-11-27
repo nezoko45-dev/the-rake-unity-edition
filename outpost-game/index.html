@@ -300,7 +300,10 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),scanAngle:0,seenObjects:[],stuckFor:0});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),scanAngle:0,seenObjects:[],failedDirections:[],stuckFor:0});
+ actor.failedDirections||(actor.failedDirections=[]);actor.failedDirections=actor.failedDirections.filter(e=>elapsed-e.at<5);
+ const rememberFailedDirection=yaw=>{const old=actor.failedDirections.find(e=>Math.abs(Math.atan2(Math.sin(e.yaw-yaw),Math.cos(e.yaw-yaw)))<.22);if(old)old.at=elapsed;else actor.failedDirections.push({yaw,at:elapsed})};
+ const failedDirectionPenalty=yaw=>{let penalty=0;for(const e of actor.failedDirections){const delta=Math.abs(Math.atan2(Math.sin(e.yaw-yaw),Math.cos(e.yaw-yaw)));if(delta<.62)penalty+=((.62-delta)/.62)*7}return penalty};
  const x=monster.position.x,z=monster.position.z;
  // One full-length beam rotates clockwise without stopping. Every hit object
  // is kept as a short-term memory entry for twelve seconds.
@@ -322,7 +325,7 @@ function updateRakeHeadLook(dt){
  let bestYaw=targetYaw,bestScore=Infinity;
  for(let i=-12;i<=12;i++){
   const yaw=targetYaw+i*(Math.PI/24),vx=Math.sin(yaw),vz=Math.cos(yaw);
-  let clearance=true,penalty=Math.abs(i)*.035;
+  let clearance=true,penalty=Math.abs(i)*.035+failedDirectionPenalty(yaw);
   for(const entry of actor.seenObjects){
    const o=entry.object,ox=o.x-x,oz=o.z-z,along=ox*vx+oz*vz;
    if(along<-.5||along>Math.min(8,Math.hypot(toX,toZ)))continue;
@@ -343,7 +346,7 @@ function updateRakeHeadLook(dt){
  const moveDir=new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y));
  const step=speed*dt,nx=x+moveDir.x*step,nz=z+moveDir.y*step;
  if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){monster.position.x=nx;monster.position.z=nz}
- else actor.stuckFor=Math.max(actor.stuckFor,.4);
+ else{rememberFailedDirection(Math.atan2(moveDir.x,moveDir.y));actor.stuckFor=Math.max(actor.stuckFor,.4);}
  return Math.hypot(monster.position.x-x,monster.position.z-z)/Math.max(dt,.001);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
