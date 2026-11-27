@@ -300,64 +300,41 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),avoiding:false,stuckFor:0,trailWaypoints:[],trailIndex:0,trailGoalX:0,trailGoalZ:0,triangleRoute:null,triangleRouteGoal:null,triangleRouteSignature:''});
+ const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),scanAngle:0,seenObjects:[],stuckFor:0});
  const x=monster.position.x,z=monster.position.z;
- const current=nearestWalkableTriangle(buildGlobalPolygonDebug(),x,z,6);
- const target=nearestWalkableTriangle(buildGlobalPolygonDebug(),goal.x,goal.z,8);
- const signature=globalPolygonDebugSignature;
- const route=actor.triangleRoute;
- const currentOnRoute=route&&current&&route.some(p=>p.key===current.key);
- const goalChanged=Math.hypot(goal.x-actor.trailGoalX,goal.z-actor.trailGoalZ)>2.75;
- const needsRoute=!route||!current||!target||actor.triangleRouteGoal!==target.key||actor.triangleRouteSignature!==signature||!currentOnRoute||goalChanged;
- if(needsRoute&&current&&target){
-  const trianglePath=triangleRoute(current,target);
-  if(trianglePath){
-   const portals=[];
-   for(let i=1;i<trianglePath.length;i++){
-    const a=trianglePath[i-1],b=trianglePath[i],shared=[];
-    for(const va of a.vertices)for(const vb of b.vertices)if(Math.abs(va.x-vb.x)<1e-5&&Math.abs(va.z-vb.z)<1e-5)shared.push(va);
-    if(shared.length>=2)portals.push({x:(shared[0].x+shared[1].x)*.5,z:(shared[0].z+shared[1].z)*.5});
-   }
-   portals.push({x:goal.x,z:goal.z});
-   // String-pull the portal chain: skip intermediate portals only when the
-   // straight segment is genuinely clear of every obstacle.
-   const smoothed=[];let from={x,z},cursor=0;
-   while(cursor<portals.length){
-    let furthest=cursor;
-    for(let j=cursor;j<portals.length;j++){
-     if(bridgeClear(from.x,from.z,portals[j].x,portals[j].z))furthest=j;
-     else break;
-    }
-    smoothed.push(portals[furthest]);from=portals[furthest];cursor=furthest+1;
-   }
-   actor.triangleRoute=trianglePath;actor.triangleRouteGoal=target.key;actor.triangleRouteSignature=signature;
-   actor.trailWaypoints=smoothed.length?smoothed:[{x:goal.x,z:goal.z}];actor.trailIndex=0;
-   actor.trailGoalX=goal.x;actor.trailGoalZ=goal.z;
-  }else{
-   actor.triangleRoute=null;actor.trailWaypoints=[{x:goal.x,z:goal.z}];actor.trailIndex=0;
-   actor.trailGoalX=goal.x;actor.trailGoalZ=goal.z;
+ // One full-length beam rotates clockwise without stopping. Every hit object
+ // is kept as a short-term memory entry for twelve seconds.
+ actor.scanAngle=(actor.scanAngle-Math.PI*1.4*Math.max(0,dt))%(Math.PI*2);
+ if(actor.scanAngle<0)actor.scanAngle+=Math.PI*2;
+ const dx=Math.sin(actor.scanAngle),dz=Math.cos(actor.scanAngle);
+ let nearest=null,nearestT=Infinity;
+ for(const obstacle of obstacles){
+  const ox=obstacle.x-x,oz=obstacle.z-z,along=ox*dx+oz*dz;
+  if(along<0||along>30)continue;
+  const perpSq=ox*ox+oz*oz-along*along,r=obstacle.r||.7;
+  if(perpSq<=r*r){const t=along-Math.sqrt(Math.max(0,r*r-perpSq));if(t<nearestT){nearestT=t;nearest=obstacle}}
+ }
+ if(nearest){const old=actor.seenObjects.find(e=>e.object===nearest);if(old)old.lastSeen=elapsed;else actor.seenObjects.push({object:nearest,lastSeen:elapsed})}
+ actor.seenObjects=actor.seenObjects.filter(e=>e.object&&obstacles.includes(e.object)&&elapsed-e.lastSeen<12);
+ const toX=goal.x-x,toZ=goal.z-z,targetYaw=Math.atan2(toX,toZ);
+ // Score a fan of candidate headings against the remembered object bounds.
+ // This is local steering only; no path, polygon route, or waypoint chain.
+ let bestYaw=targetYaw,bestScore=Infinity;
+ for(let i=-12;i<=12;i++){
+  const yaw=targetYaw+i*(Math.PI/24),vx=Math.sin(yaw),vz=Math.cos(yaw);
+  let clearance=true,penalty=Math.abs(i)*.035;
+  for(const entry of actor.seenObjects){
+   const o=entry.object,ox=o.x-x,oz=o.z-z,along=ox*vx+oz*vz;
+   if(along<-.5||along>Math.min(8,Math.hypot(toX,toZ)))continue;
+   const side=Math.abs(ox*vz-oz*vx),safe=(o.r||.7)+1.05;
+   if(side<safe){clearance=false;penalty+=(safe-side)*3+(8-along)*.08}
   }
+  const nx=x+vx*Math.min(1.25,speed*Math.max(dt,.016)),nz=z+vz*Math.min(1.25,speed*Math.max(dt,.016));
+  if(blocked(nx,nz)||!bridgeClear(x,z,nx,nz)){clearance=false;penalty+=100}
+  if(!clearance)penalty+=18;
+  if(penalty<bestScore){bestScore=penalty;bestYaw=yaw}
  }
- if(!actor.trailWaypoints||!actor.trailWaypoints.length)actor.trailWaypoints=[{x:goal.x,z:goal.z}];
- // Keep the final trail point attached to a moving survivor without rebuilding
- // the whole route for every small movement.
- actor.trailWaypoints[actor.trailWaypoints.length-1]={x:goal.x,z:goal.z};
- while(actor.trailIndex<actor.trailWaypoints.length-1){
-  const p=actor.trailWaypoints[actor.trailIndex];
-  if(Math.hypot(p.x-x,p.z-z)>.55)break;
-  actor.trailIndex++;
- }
- let remaining=actor.trailWaypoints.slice(actor.trailIndex);
- if(!remaining.length)remaining=[{x:goal.x,z:goal.z}];
- const mode=remaining.length>1||!bridgeClear(x,z,goal.x,goal.z)?'avoid':'direct';
- // The rendered line geometry itself supplies Rake's look-ahead steering point.
- updateRakeTrailGizmo(remaining,mode);
- const guide=rakeTrailGizmo&&rakeTrailGizmo.steeringTarget;
- if(!guide)return 0;
- const steering=new THREE.Vector2(guide.x-x,guide.z-z);
- if(steering.lengthSq()<.0025)return 0;
- steering.normalize();actor.dir.copy(steering);actor.avoiding=mode==='avoid';
- const desiredYaw=Math.atan2(steering.x,steering.y);
+ const desiredYaw=bestYaw;
  let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
  monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*dt);
  delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
@@ -366,7 +343,7 @@ function updateRakeHeadLook(dt){
  const moveDir=new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y));
  const step=speed*dt,nx=x+moveDir.x*step,nz=z+moveDir.y*step;
  if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){monster.position.x=nx;monster.position.z=nz}
- else{actor.stuckFor=Math.max(actor.stuckFor,.4);actor.triangleRoute=null;actor.trailWaypoints=[]}
+ else actor.stuckFor=Math.max(actor.stuckFor,.4);
  return Math.hypot(monster.position.x-x,monster.position.z-z)/Math.max(dt,.001);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
