@@ -310,15 +310,20 @@ function updateRakeHeadLook(dt){
  actor.scanAngle=(actor.scanAngle-Math.PI*1.4*Math.max(0,dt))%(Math.PI*2);
  if(actor.scanAngle<0)actor.scanAngle+=Math.PI*2;
  const dx=Math.sin(actor.scanAngle),dz=Math.cos(actor.scanAngle);
- let nearest=null,nearestT=Infinity;
+ let nearest=null,nearestT=Infinity,nearestContour=null;
  for(const obstacle of obstacles){
-  const ox=obstacle.x-x,oz=obstacle.z-z,along=ox*dx+oz*dz;
-  if(along<0||along>30)continue;
-  const perpSq=ox*ox+oz*oz-along*along,r=obstacle.r||.7;
-  if(perpSq<=r*r){const t=along-Math.sqrt(Math.max(0,r*r-perpSq));if(t<nearestT){nearestT=t;nearest=obstacle}}
+  const bounds=new THREE.Box3();bounds.makeEmpty();
+  for(const mesh of obstacle.meshes||[]){mesh.updateMatrixWorld(true);bounds.union(new THREE.Box3().setFromObject(mesh))}
+  if(bounds.isEmpty())continue;
+  let lo=0,hi=30,valid=true;
+  for(const [origin,dir,min,max] of [[x,dx,bounds.min.x,bounds.max.x],[z,dz,bounds.min.z,bounds.max.z]]){
+   if(Math.abs(dir)<1e-8){if(origin<min||origin>max){valid=false;break}}
+   else{let a=(min-origin)/dir,b=(max-origin)/dir;if(a>b){const q=a;a=b;b=q}lo=Math.max(lo,a);hi=Math.min(hi,b);if(hi<lo){valid=false;break}}
+  }
+  if(valid&&hi>=0&&lo<nearestT){nearestT=Math.max(0,lo);nearest=obstacle;nearestContour={minX:bounds.min.x,maxX:bounds.max.x,minZ:bounds.min.z,maxZ:bounds.max.z}}
  }
- if(nearest){const old=actor.seenObjects.find(e=>e.object===nearest);if(old)old.lastSeen=elapsed;else actor.seenObjects.push({object:nearest,lastSeen:elapsed})}
- actor.seenObjects=actor.seenObjects.filter(e=>e.object&&obstacles.includes(e.object)&&elapsed-e.lastSeen<12);
+ if(nearest){const old=actor.seenObjects.find(e=>e.object===nearest);if(old){old.lastSeen=elapsed;old.contour=nearestContour}else actor.seenObjects.push({object:nearest,lastSeen:elapsed,contour:nearestContour})}
+ actor.seenObjects=actor.seenObjects.filter(e=>e.object&&obstacles.includes(e.object)&&elapsed-e.lastSeen<12&&e.contour);
  const toX=goal.x-x,toZ=goal.z-z,targetYaw=Math.atan2(toX,toZ);
  // Score a fan of candidate headings against the remembered object bounds.
  // This is local steering only; no path, polygon route, or waypoint chain.
@@ -326,11 +331,14 @@ function updateRakeHeadLook(dt){
  for(let i=-12;i<=12;i++){
   const yaw=targetYaw+i*(Math.PI/24),vx=Math.sin(yaw),vz=Math.cos(yaw);
   let clearance=true,penalty=Math.abs(i)*.035+failedDirectionPenalty(yaw);
+  const look=Math.min(8,Math.hypot(toX,toZ)),endX=x+vx*look,endZ=z+vz*look;
   for(const entry of actor.seenObjects){
-   const o=entry.object,ox=o.x-x,oz=o.z-z,along=ox*vx+oz*vz;
-   if(along<-.5||along>Math.min(8,Math.hypot(toX,toZ)))continue;
-   const side=Math.abs(ox*vz-oz*vx),safe=(o.r||.7)+1.05;
-   if(side<safe){clearance=false;penalty+=(safe-side)*3+(8-along)*.08}
+   const b=entry.contour,pad=1.05;let lo=0,hi=1,intersects=true;
+   for(const [origin,delta,min,max] of [[x,endX-x,b.minX-pad,b.maxX+pad],[z,endZ-z,b.minZ-pad,b.maxZ+pad]]){
+    if(Math.abs(delta)<1e-8){if(origin<min||origin>max){intersects=false;break}}
+    else{let a=(min-origin)/delta,q=(max-origin)/delta;if(a>q){const t=a;a=q;q=t}lo=Math.max(lo,a);hi=Math.min(hi,q);if(hi<lo){intersects=false;break}}
+   }
+   if(intersects){clearance=false;penalty+=24+(1-hi)*8}
   }
   const nx=x+vx*Math.min(1.25,speed*Math.max(dt,.016)),nz=z+vz*Math.min(1.25,speed*Math.max(dt,.016));
   if(blocked(nx,nz)||!bridgeClear(x,z,nx,nz)){clearance=false;penalty+=100}
