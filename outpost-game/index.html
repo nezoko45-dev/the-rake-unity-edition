@@ -343,47 +343,19 @@ function updateRakeHeadLook(dt){
  headBone.quaternion.multiply(q);headBone.userData.trackApplied=q.clone();
 }function rakeSeesPlayerInFov(){if(!monster)return false;const p=controls.getObject().position;const dx=p.x-monster.position.x,dz=p.z-monster.position.z;const len=Math.hypot(dx,dz);if(len<.001)return false;const forwardX=Math.sin(monster.rotation.y),forwardZ=Math.cos(monster.rotation.y);const dot=(forwardX*dx+forwardZ*dz)/len;return dot>=Math.cos(THREE.MathUtils.degToRad(30))}function rakeZumbaMove(goal,dt,speed){
  if(!monster||!goal||speed<=0)return 0;
- const actor=monster.zumba||(monster.zumba={dir:new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y)),scanAngle:0,seenObjects:[],failedDirections:[],stuckFor:0});
- actor.failedDirections||(actor.failedDirections=[]);actor.failedDirections=actor.failedDirections.filter(e=>elapsed-e.at<5);
- const rememberFailedDirection=yaw=>{const old=actor.failedDirections.find(e=>Math.abs(Math.atan2(Math.sin(e.yaw-yaw),Math.cos(e.yaw-yaw)))<.22);if(old)old.at=elapsed;else actor.failedDirections.push({yaw,at:elapsed})};
- const failedDirectionPenalty=yaw=>{let penalty=0;for(const e of actor.failedDirections){const delta=Math.abs(Math.atan2(Math.sin(e.yaw-yaw),Math.cos(e.yaw-yaw)));if(delta<.62)penalty+=((.62-delta)/.62)*7}return penalty};
- const x=monster.position.x,z=monster.position.z;
- // Query the shared spatial obstacle map; no rotating ray or per-frame scene scan.
- const nearbyMapEntries=queryRakeGlobalObstacleMap(x,z,30);
- for(const entry of nearbyMapEntries){const obstacle=entry.obstacle,old=actor.seenObjects.find(e=>e.object===obstacle);if(old){old.lastSeen=elapsed;old.contour=entry.contour}else actor.seenObjects.push({object:obstacle,lastSeen:elapsed,contour:entry.contour})}
- actor.seenObjects=actor.seenObjects.filter(e=>e.object&&obstacles.includes(e.object)&&elapsed-e.lastSeen<12&&e.contour);
- const toX=goal.x-x,toZ=goal.z-z,targetYaw=Math.atan2(toX,toZ);
- // Score a fan of candidate headings against the remembered object bounds.
- // This is local steering only; no path, polygon route, or waypoint chain.
- let bestYaw=targetYaw,bestScore=Infinity;
- for(let i=-12;i<=12;i++){
-  const yaw=targetYaw+i*(Math.PI/24),vx=Math.sin(yaw),vz=Math.cos(yaw);
-  let clearance=true,penalty=Math.abs(i)*.035+failedDirectionPenalty(yaw);
-  const look=Math.min(8,Math.hypot(toX,toZ)),endX=x+vx*look,endZ=z+vz*look;
-  for(const entry of actor.seenObjects){
-   const b=entry.contour,pad=1.05;let lo=0,hi=1,intersects=true;
-   for(const [origin,delta,min,max] of [[x,endX-x,b.minX-pad,b.maxX+pad],[z,endZ-z,b.minZ-pad,b.maxZ+pad]]){
-    if(Math.abs(delta)<1e-8){if(origin<min||origin>max){intersects=false;break}}
-    else{let a=(min-origin)/delta,q=(max-origin)/delta;if(a>q){const t=a;a=q;q=t}lo=Math.max(lo,a);hi=Math.min(hi,q);if(hi<lo){intersects=false;break}}
-   }
-   if(intersects){clearance=false;penalty+=24+(1-hi)*8}
-  }
-  const nx=x+vx*Math.min(1.25,speed*Math.max(dt,.016)),nz=z+vz*Math.min(1.25,speed*Math.max(dt,.016));
-  if(blocked(nx,nz)||!bridgeClear(x,z,nx,nz)){clearance=false;penalty+=100}
-  if(!clearance)penalty+=18;
-  if(penalty<bestScore){bestScore=penalty;bestYaw=yaw}
+ // Follow connected walkable triangles and their shared-edge portals.
+ // The clipped polygon surface remains the final segment-clearance authority.
+ const actor=monster.zumba||(monster.zumba={x:monster.position.x,z:monster.position.z,yaw:monster.rotation.y,triangleRoute:null,triangleRouteIndex:0});
+ actor.x=monster.position.x;actor.z=monster.position.z;actor.yaw=monster.rotation.y;
+ const beforeX=actor.x,beforeZ=actor.z;
+ triangleNavMove(actor,goal,Math.min(Math.max(dt,0),.05),speed,true);
+ if(Math.hypot(actor.x-beforeX,actor.z-beforeZ)>.0001){
+  monster.position.x=actor.x;monster.position.z=actor.z;
+  const yaw=Math.atan2(actor.x-beforeX,actor.z-beforeZ);
+  const delta=Math.atan2(Math.sin(yaw-monster.rotation.y),Math.cos(yaw-monster.rotation.y));
+  monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*Math.max(0,dt));
  }
- const desiredYaw=bestYaw;
- let delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
- monster.rotation.y+=Math.sign(delta)*Math.min(Math.abs(delta),3.2*dt);
- delta=Math.atan2(Math.sin(desiredYaw-monster.rotation.y),Math.cos(desiredYaw-monster.rotation.y));
- if(Math.abs(delta)>.06)return 0;
- monster.rotation.y+=delta;
- const moveDir=new THREE.Vector2(Math.sin(monster.rotation.y),Math.cos(monster.rotation.y));
- const step=speed*dt,nx=x+moveDir.x*step,nz=z+moveDir.y*step;
- if(!blocked(nx,nz)&&bridgeClear(x,z,nx,nz)){monster.position.x=nx;monster.position.z=nz}
- else{rememberFailedDirection(Math.atan2(moveDir.x,moveDir.y));actor.stuckFor=Math.max(actor.stuckFor,.4);}
- return Math.hypot(monster.position.x-x,monster.position.z-z)/Math.max(dt,.001);
+ return Math.hypot(actor.x-beforeX,actor.z-beforeZ)/Math.max(dt,.001);
 }
 function moveEnemy(dt){if(!monster||gameover)return;if(rakeDamageCd>0)rakeDamageCd=Math.max(0,rakeDamageCd-dt);const p=controls.getObject().position,dx=p.x-monster.position.x,dz=p.z-monster.position.z,d=Math.hypot(dx,dz);let goal,oldX=monster.position.x,oldZ=monster.position.z;
  if(!isNight){enemyState='retreat';goal=rakeSpawn;enemySpeed=6.2;patrolTarget=null;chaseTarget=null;aiCheckAt=elapsed+11}
