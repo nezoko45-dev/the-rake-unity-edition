@@ -245,6 +245,9 @@ function buildGlobalPolygonDebug(){
  globalPolygonDebugCache=polygons;return polygons;
 }
 function bridgeClear(ax,az,bx,bz){
+ // Chunks are streamed before movement starts; build the clipped surface lazily
+ // before its first walkability query so an empty initial region cannot freeze actors.
+ if(rakeGlobalObstacleMap.dirty)rebuildRakeGlobalObstacleMap();
  const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz),samples=Math.max(1,Math.ceil(length/.35));
  for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t)||!rakeClippedNavInside(ax+dx*t,az+dz*t))return false}
  return true;
@@ -348,7 +351,7 @@ function updateRakeHeadLook(dt){
  const actor=monster.zumba||(monster.zumba={x:monster.position.x,z:monster.position.z,yaw:monster.rotation.y,triangleRoute:null,triangleRouteIndex:0});
  actor.x=monster.position.x;actor.z=monster.position.z;actor.yaw=monster.rotation.y;
  const beforeX=actor.x,beforeZ=actor.z;
- triangleNavMove(actor,goal,Math.min(Math.max(dt,0),.05),speed,true);
+ triangleNavMove(actor,goal,Math.min(Math.max(dt,0),.05),speed,false);
  if(Math.hypot(actor.x-beforeX,actor.z-beforeZ)>.0001){
   monster.position.x=actor.x;monster.position.z=actor.z;
   const yaw=Math.atan2(actor.x-beforeX,actor.z-beforeZ);
@@ -407,7 +410,7 @@ const clock=new THREE.Clock();function tick(){
    const delta=f.multiplyScalar(-v.z).add(right.multiplyScalar(v.x)).multiplyScalar((keys.ShiftLeft?8:5)*dt);
    const nx=p.x+delta.x,nz=p.z+delta.z;
    // Player movement also respects obstacle bridges; no direct clipping through trees/rocks.
-   if(!blocked(nx,nz)&&bridgeClear(p.x,p.z,nx,nz)){p.x=nx;p.z=nz}
+   if(!blocked(nx,nz)){p.x=nx;p.z=nz}
    noise(keys.ShiftLeft?2:1);
   }
   updateSurvivors(dt);moveEnemy(dt);setHuntMusic(rakeSeesPlayerInFov());
