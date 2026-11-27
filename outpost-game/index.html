@@ -256,21 +256,51 @@ function bridgeClear(ax,az,bx,bz){
 function rakeMeshSteerFallback(actor,goal,dt,speed){
  if(!rakeClippedNavRegions.length||!goal)return false;
  const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);if(dist<.05)return false;
- const desired=Math.atan2(dx,dz),step=Math.min(Math.max(speed*dt,.04),Math.max(.04,dist));
- let best=null,bestScore=-Infinity;
- // Try the target direction first, then progressively wider turns. Each
- // candidate must stay on the clipped walkable surface for the whole step.
- for(let k=0;k<25;k++){
-  const offset=k===0?0:(Math.ceil(k/2)*Math.PI/24)*(k%2?1:-1);
-  const angle=desired+offset,nx=actor.x+Math.sin(angle)*step,nz=actor.z+Math.cos(angle)*step;
-  if(!bridgeClear(actor.x,actor.z,nx,nz))continue;
-  const remaining=Math.hypot(goal.x-nx,goal.z-nz);
-  const score=(dist-remaining)-Math.abs(offset)*.025;
-  if(score>bestScore){bestScore=score;best={x:nx,z:nz,angle}}
-  if(k===0&&best)break;
+ const desired=Math.atan2(dx,dz),step=Math.min(Math.max(speed*Math.min(dt,.05),.025),Math.max(.025,dist));
+ // Direct steering is preferred whenever the clipped surface is clear.
+ // Only when a carved-out hole blocks the look-ahead do we bend around its edge.
+ const look=Math.min(Math.max(1.1,speed*.7),Math.max(1.1,dist));
+ const directX=actor.x+Math.sin(desired)*look,directZ=actor.z+Math.cos(desired)*look;
+ let chosen=desired,blockedDirect=!rakeClippedNavSegmentClear(actor.x,actor.z,directX,directZ,.22);
+ if(blockedDirect){
+  const previous=Number.isFinite(actor.steerAngle)?actor.steerAngle:desired;
+  const preferredSide=actor.avoidSide||0;
+  let bestScore=-Infinity,bestAngle=null,bestSide=preferredSide;
+  // Probe the clipped walkable polygon, not physics rays. Keep a consistent
+  // side around each hole and penalize sudden steering reversals.
+  for(let ring=1;ring<=18;ring++){
+   const magnitude=ring*(Math.PI/36);
+   for(const side of (preferredSide?[preferredSide,-preferredSide]:[1,-1])){
+    const angle=desired+side*magnitude;
+    const ex=actor.x+Math.sin(angle)*look,ez=actor.z+Math.cos(angle)*look;
+    if(!rakeClippedNavSegmentClear(actor.x,actor.z,ex,ez,.22))continue;
+    const progress=Math.hypot(goal.x-actor.x,goal.z-actor.z)-Math.hypot(goal.x-ex,goal.z-ez);
+    const alignment=Math.cos(angle-desired);
+    const continuity=Math.cos(angle-previous);
+    const score=progress*2.2+alignment*1.1+continuity*.9-magnitude*.08;
+    if(score>bestScore){bestScore=score;bestAngle=angle;bestSide=side}
+   }
+   if(bestAngle!==null)break;
+  }
+  if(bestAngle===null)return false;
+  chosen=bestAngle;actor.avoidSide=bestSide;
+ }else{
+  actor.avoidSide=0;
  }
- if(!best)return false;
- actor.x=best.x;actor.z=best.z;actor.yaw=best.angle;actor.triangleRoute=null;return true;
+ // Smooth heading changes to prevent left/right oscillation.
+ const previous=Number.isFinite(actor.steerAngle)?actor.steerAngle:chosen;
+ let delta=Math.atan2(Math.sin(chosen-previous),Math.cos(chosen-previous));
+ const maxTurn=(blockedDirect?2.0:3.4)*Math.max(0,Math.min(dt,.05));
+ actor.steerAngle=previous+Math.max(-maxTurn,Math.min(maxTurn,delta));
+ const nx=actor.x+Math.sin(actor.steerAngle)*step,nz=actor.z+Math.cos(actor.steerAngle)*step;
+ if(!rakeClippedNavSegmentClear(actor.x,actor.z,nx,nz,.18)){
+  // Tighten the step rather than selecting a new portal/waypoint.
+  const shortStep=step*.35,sx=actor.x+Math.sin(actor.steerAngle)*shortStep,sz=actor.z+Math.cos(actor.steerAngle)*shortStep;
+  if(!rakeClippedNavSegmentClear(actor.x,actor.z,sx,sz,.12))return false;
+  actor.x=sx;actor.z=sz;
+ }else{actor.x=nx;actor.z=nz}
+ actor.yaw=actor.steerAngle;
+ return true;
 }
 function nearestWalkableTriangle(polygons,x,z,maxDistance=7){
  const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
@@ -306,36 +336,12 @@ function triangleRoute(start,goal){
  return null;
 }
 function triangleNavMove(actor,goal,dt,speed,portalOnly=false){
+ // No triangle routes, portals, centroids, or waypoint hopping.
+ // Actors move directly toward the target and bend only when the clipped
+ // navigation polygon reports a hole in the look-ahead corridor.
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
  if(rakeGlobalObstacleMap.dirty)rebuildRakeGlobalObstacleMap();
- const polygons=buildGlobalPolygonDebug(),current=nearestWalkableTriangle(polygons,actor.x,actor.z,8),target=nearestWalkableTriangle(polygons,goal.x,goal.z,10);
- if(!current||!target){rakeMeshSteerFallback(actor,goal,dt,speed);return;}
- let route=actor.triangleRoute,index=actor.triangleRouteIndex||0;
- const currentOnRoute=route&&route.slice(Math.max(0,index-1)).some(p=>p.key===current.key);
- if(!route||actor.triangleRouteGoal!==target.key||actor.triangleRouteSignature!==globalPolygonDebugSignature||!currentOnRoute||elapsed-(actor.triangleRouteAt||0)>1.25){
-  route=triangleRoute(current,target);
-  if(!route){actor.triangleRoute=null;rakeMeshSteerFallback(actor,goal,dt,speed);return}
-  actor.triangleRoute=route;actor.triangleRouteGoal=target.key;actor.triangleRouteSignature=globalPolygonDebugSignature;actor.triangleRouteAt=elapsed;actor.triangleRouteIndex=0;index=0;
- }
- // Travel through shared-edge portals, not alternating triangle centroids.
-  // Centroid-to-centroid routing zigzags across every diagonal in the mesh.
-  const waypoints=[];
-  for(let ri=1;ri<route.length;ri++){
-   const prev=route[ri-1],next=route[ri],shared=[];
-   for(const a of prev.vertices)for(const b of next.vertices)if(Math.abs(a.x-b.x)<1e-5&&Math.abs(a.z-b.z)<1e-5)shared.push(a);
-   if(shared.length>=2)waypoints.push({x:(shared[0].x+shared[1].x)*.5,z:(shared[0].z+shared[1].z)*.5});
-   else if(!portalOnly)waypoints.push({x:next.x,z:next.z});
-   else return; // Rake never falls back to triangle-centroid steering.
-  }
-  waypoints.push({x:goal.x,z:goal.z});
-  if(!waypoints.length)waypoints.push({x:goal.x,z:goal.z});
- index=Math.min(actor.triangleRouteIndex||0,waypoints.length-1);
- while(index<waypoints.length-1&&Math.hypot(waypoints[index].x-actor.x,waypoints[index].z-actor.z)<.34)index++;
- actor.triangleRouteIndex=index;
- const waypoint=waypoints[index],dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,d=Math.hypot(dx,dz);
- if(d<.035)return;
- const step=Math.min(speed*dt,d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;
- if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz)}else{rakeMeshSteerFallback(actor,goal,dt,speed)}
+ rakeMeshSteerFallback(actor,goal,dt,speed);
 }
 updateChunks();
 const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
