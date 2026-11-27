@@ -245,12 +245,32 @@ function buildGlobalPolygonDebug(){
  globalPolygonDebugCache=polygons;return polygons;
 }
 function bridgeClear(ax,az,bx,bz){
- // Chunks are streamed before movement starts; build the clipped surface lazily
- // before its first walkability query so an empty initial region cannot freeze actors.
+ // The clipped navmesh is the walkability authority. The old circular obstacle
+ // radii are deliberately not consulted here: they over-inflate tree canopies
+ // and reject visually open floor corridors.
  if(rakeGlobalObstacleMap.dirty)rebuildRakeGlobalObstacleMap();
- const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz),samples=Math.max(1,Math.ceil(length/.35));
- for(let i=0;i<=samples;i++){const t=i/samples;if(blocked(ax+dx*t,az+dz*t)||!rakeClippedNavInside(ax+dx*t,az+dz*t))return false}
+ const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz),samples=Math.max(1,Math.ceil(length/.22));
+ for(let i=1;i<=samples;i++){const t=i/samples;if(!rakeClippedNavInside(ax+dx*t,az+dz*t))return false}
  return true;
+}
+function rakeMeshSteerFallback(actor,goal,dt,speed){
+ if(!rakeClippedNavRegions.length||!goal)return false;
+ const dx=goal.x-actor.x,dz=goal.z-actor.z,dist=Math.hypot(dx,dz);if(dist<.05)return false;
+ const desired=Math.atan2(dx,dz),step=Math.min(Math.max(speed*dt,.04),Math.max(.04,dist));
+ let best=null,bestScore=-Infinity;
+ // Try the target direction first, then progressively wider turns. Each
+ // candidate must stay on the clipped walkable surface for the whole step.
+ for(let k=0;k<25;k++){
+  const offset=k===0?0:(Math.ceil(k/2)*Math.PI/24)*(k%2?1:-1);
+  const angle=desired+offset,nx=actor.x+Math.sin(angle)*step,nz=actor.z+Math.cos(angle)*step;
+  if(!bridgeClear(actor.x,actor.z,nx,nz))continue;
+  const remaining=Math.hypot(goal.x-nx,goal.z-nz);
+  const score=(dist-remaining)-Math.abs(offset)*.025;
+  if(score>bestScore){bestScore=score;best={x:nx,z:nz,angle}}
+  if(k===0&&best)break;
+ }
+ if(!best)return false;
+ actor.x=best.x;actor.z=best.z;actor.yaw=best.angle;actor.triangleRoute=null;return true;
 }
 function nearestWalkableTriangle(polygons,x,z,maxDistance=7){
  const ix=Math.floor(x/NAV_TRI_CELL),iz=Math.floor(z/NAV_TRI_CELL);
@@ -287,13 +307,14 @@ function triangleRoute(start,goal){
 }
 function triangleNavMove(actor,goal,dt,speed,portalOnly=false){
  if(!goal||!Number.isFinite(goal.x)||!Number.isFinite(goal.z)||speed<=0)return;
- const polygons=buildGlobalPolygonDebug(),current=nearestWalkableTriangle(polygons,actor.x,actor.z,5),target=nearestWalkableTriangle(polygons,goal.x,goal.z,7);
- if(!current||!target)return;
+ if(rakeGlobalObstacleMap.dirty)rebuildRakeGlobalObstacleMap();
+ const polygons=buildGlobalPolygonDebug(),current=nearestWalkableTriangle(polygons,actor.x,actor.z,8),target=nearestWalkableTriangle(polygons,goal.x,goal.z,10);
+ if(!current||!target){rakeMeshSteerFallback(actor,goal,dt,speed);return;}
  let route=actor.triangleRoute,index=actor.triangleRouteIndex||0;
  const currentOnRoute=route&&route.slice(Math.max(0,index-1)).some(p=>p.key===current.key);
  if(!route||actor.triangleRouteGoal!==target.key||actor.triangleRouteSignature!==globalPolygonDebugSignature||!currentOnRoute||elapsed-(actor.triangleRouteAt||0)>1.25){
   route=triangleRoute(current,target);
-  if(!route){actor.triangleRoute=null;return}
+  if(!route){actor.triangleRoute=null;rakeMeshSteerFallback(actor,goal,dt,speed);return}
   actor.triangleRoute=route;actor.triangleRouteGoal=target.key;actor.triangleRouteSignature=globalPolygonDebugSignature;actor.triangleRouteAt=elapsed;actor.triangleRouteIndex=0;index=0;
  }
  // Travel through shared-edge portals, not alternating triangle centroids.
@@ -314,7 +335,7 @@ function triangleNavMove(actor,goal,dt,speed,portalOnly=false){
  const waypoint=waypoints[index],dx=waypoint.x-actor.x,dz=waypoint.z-actor.z,d=Math.hypot(dx,dz);
  if(d<.035)return;
  const step=Math.min(speed*dt,d),nx=actor.x+dx/d*step,nz=actor.z+dz/d*step;
- if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz)}
+ if(bridgeClear(actor.x,actor.z,nx,nz)){actor.x=nx;actor.z=nz;actor.yaw=Math.atan2(dx,dz)}else{rakeMeshSteerFallback(actor,goal,dt,speed)}
 }
 updateChunks();
 const survivors=[];const survivorMat=mat(0x8aa4bd),skinMat=mat(0xc4a18a),gearMat=mat(0x354454);
